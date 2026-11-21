@@ -1,0 +1,186 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Terminal Claude: use this phone's terminal (and Claude Code) from a computer.
+#
+#   remote-access start [--local]  start the web terminal and the SSH server
+#   remote-access stop             stop both
+#   remote-access status           show what's running and the addresses to open
+#   remote-access password         set the password for both
+#   remote-access autostart on|off start automatically when the app opens
+#
+# The web terminal is ttyd on port 7681 and the SSH server is Termux's sshd on
+# port 8022. --local listens on 127.0.0.1 only: use it with `adb forward` over USB.
+
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+STATE_DIR="$HOME/.terminal-claude"
+CONF="$STATE_DIR/remote-access.conf"
+AUTOSTART="$STATE_DIR/remote-access.autostart"
+TTYD_PID="$STATE_DIR/ttyd.pid"
+TTYD_LOG="$STATE_DIR/ttyd.log"
+SSHD_PID="$PREFIX/var/run/sshd.pid"
+WEB_PORT=7681
+SSH_PORT=8022
+WEB_USER=claude
+
+bold=$'\e[1m'; green=$'\e[32m'; yellow=$'\e[33m'; red=$'\e[31m'; reset=$'\e[0m'
+QUIET=0
+
+say()  { [ "$QUIET" = 1 ] || printf '%s\n' "$*"; }
+die()  { printf '%s%s%s\n' "$red" "$*" "$reset" >&2; exit 1; }
+
+mkdir -p "$STATE_DIR"
+
+ensure_packages() {
+    local missing=()
+    command -v ttyd >/dev/null 2>&1 || missing+=(ttyd)
+    command -v sshd >/dev/null 2>&1 || missing+=(openssh)
+    command -v ifconfig >/dev/null 2>&1 || missing+=(net-tools)
+    if [ ${#missing[@]} -gt 0 ]; then
+        say "Installing ${missing[*]}..."
+        pkg install -y "${missing[@]}" || die "Could not install ${missing[*]}."
+    fi
+}
+
+# Prints the phone's IPv4 addresses (Wi-Fi, hotspot, USB tethering), one per line.
+phone_ips() {
+    {
+        ifconfig 2>/dev/null | awk '/inet / { for (i = 1; i <= NF; i++) if ($i == "inet") print $(i + 1) }'
+        ip -4 -o addr show 2>/dev/null | awk '{ split($4, a, "/"); print a[1] }'
+    } | sed 's/^addr://' | grep -v '^127\.' | sort -u
+}
+
+is_running() { [ -f "$1" ] && kill -0 "$(cat "$1" 2>/dev/null)" 2>/dev/null; }
+
+load_conf() { [ -f "$CONF" ] && . "$CONF"; }
+
+set_password() {
+    [ -t 0 ] || die "Run 'remote-access password' in the terminal to set a password."
+    local p1 p2
+    echo "Choose a password for opening this terminal from a computer."
+    while :; do
+        read -r -s -p "New password (at least 8 characters): " p1; echo
+        [ ${#p1} -ge 8 ] || { echo "Too short."; continue; }
+        case "$p1" in *:*|*\'*) echo "Please don't use ':' or quote characters."; continue ;; esac
+        read -r -s -p "Repeat it: " p2; echo
+        [ "$p1" = "$p2" ] && break
+        echo "They don't match. Try again."
+    done
+    umask 077
+    printf "WEB_PASS='%s'\n" "$p1" >"$CONF"
+    chmod 600 "$CONF"
+    echo
+    echo "Now set the SSH password. Type the same password twice more:"
+    passwd || echo "${yellow}SSH password not changed. Run 'passwd' later to set it.${reset}"
+    echo "${green}Password saved.${reset}"
+}
+
+print_addresses() {
+    local local_only="$1" ips
+    echo
+    if [ "$local_only" = 1 ]; then
+        echo "Listening on this phone only (127.0.0.1). On your computer, with the phone"
+        echo "connected by USB and USB debugging on, run:"
+        echo
+        echo "    ${bold}adb forward tcp:$WEB_PORT tcp:$WEB_PORT${reset}"
+        echo "    ${bold}adb forward tcp:$SSH_PORT tcp:$SSH_PORT${reset}"
+        echo
+        echo "Then open ${bold}http://localhost:$WEB_PORT${reset}   or   ${bold}ssh -p $SSH_PORT localhost${reset}"
+    else
+        ips="$(phone_ips)"
+        if [ -z "$ips" ]; then
+            echo "${yellow}No network address found. Connect the phone to Wi-Fi (or turn on its hotspot).${reset}"
+        else
+            echo "On a computer on the same Wi-Fi, open:"
+            for ip in $ips; do echo "    Web terminal:  ${bold}http://$ip:$WEB_PORT${reset}"; done
+            for ip in $ips; do echo "    SSH:           ${bold}ssh -p $SSH_PORT $ip${reset}"; done
+        fi
+        echo
+        echo "Or over USB: ${bold}adb forward tcp:$WEB_PORT tcp:$WEB_PORT${reset}, then http://localhost:$WEB_PORT"
+    fi
+    echo "Web terminal login: user ${bold}$WEB_USER${reset}, and the password you set."
+    echo "Type ${bold}claude${reset} in it to start Claude Code."
+}
+
+start() {
+    local local_only=0
+    [ "$1" = "--local" ] && local_only=1
+    ensure_packages
+    load_conf
+    if [ -z "$WEB_PASS" ]; then
+        [ "$QUIET" = 1 ] && exit 0  # autostart without a password: do nothing
+        set_password
+        load_conf
+    fi
+
+    # Web terminal.
+    if is_running "$TTYD_PID"; then
+        say "Web terminal already running."
+    else
+        local iface=()
+        [ "$local_only" = 1 ] && iface=(-i lo)
+        local detach=()
+        command -v setsid >/dev/null 2>&1 && detach=(setsid)
+        nohup "${detach[@]}" ttyd -p "$WEB_PORT" "${iface[@]}" -W \
+            -c "$WEB_USER:$WEB_PASS" \
+            -t titleFixed="Terminal Claude" -t fontSize=15 \
+            "$PREFIX/bin/bash" -l >"$TTYD_LOG" 2>&1 &
+        echo $! >"$TTYD_PID"
+        sleep 1
+        is_running "$TTYD_PID" || die "The web terminal did not start. See $TTYD_LOG"
+        say "${green}Web terminal started on port $WEB_PORT.${reset}"
+    fi
+
+    # SSH server.
+    if is_running "$SSHD_PID"; then
+        say "SSH server already running."
+    else
+        local listen=()
+        [ "$local_only" = 1 ] && listen=(-o ListenAddress=127.0.0.1)
+        sshd -p "$SSH_PORT" "${listen[@]}" && say "${green}SSH server started on port $SSH_PORT.${reset}" \
+            || say "${yellow}SSH server did not start (the web terminal still works).${reset}"
+    fi
+
+    echo "$local_only" >"$STATE_DIR/remote-access.local"
+    # Keep the CPU awake so the servers answer while the screen is off.
+    termux-wake-lock >/dev/null 2>&1
+    [ "$QUIET" = 1 ] || print_addresses "$local_only"
+}
+
+stop() {
+    if is_running "$TTYD_PID"; then kill "$(cat "$TTYD_PID")" && echo "Web terminal stopped."; fi
+    rm -f "$TTYD_PID"
+    if is_running "$SSHD_PID"; then kill "$(cat "$SSHD_PID")" && echo "SSH server stopped."; fi
+    termux-wake-unlock >/dev/null 2>&1
+}
+
+status() {
+    local local_only
+    local_only="$(cat "$STATE_DIR/remote-access.local" 2>/dev/null || echo 0)"
+    if is_running "$TTYD_PID"; then echo "Web terminal: ${green}running${reset} (port $WEB_PORT)"; else echo "Web terminal: stopped"; fi
+    if is_running "$SSHD_PID"; then echo "SSH server:   ${green}running${reset} (port $SSH_PORT)"; else echo "SSH server:   stopped"; fi
+    if [ -f "$AUTOSTART" ]; then echo "Autostart:    on"; else echo "Autostart:    off"; fi
+    echo
+    echo "This phone's addresses: $(phone_ips | tr '\n' ' ')"
+    if is_running "$TTYD_PID" || is_running "$SSHD_PID"; then print_addresses "$local_only"; fi
+}
+
+case "$1" in
+    start)     shift; start "$@" ;;
+    stop)      stop ;;
+    restart)   shift; stop; start "$@" ;;
+    status|"") status ;;
+    password)  set_password; is_running "$TTYD_PID" && { echo "Restarting the web terminal..."; kill "$(cat "$TTYD_PID")"; sleep 1; start "$(grep -q 1 "$STATE_DIR/remote-access.local" 2>/dev/null && echo --local)"; } ;;
+    autostart)
+        case "$2" in
+            on)  echo "${3:-}" >"$AUTOSTART"; echo "Remote access will start whenever the app opens." ;;
+            off) rm -f "$AUTOSTART"; echo "Autostart turned off." ;;
+            *)   die "Usage: remote-access autostart on [--local] | off" ;;
+        esac ;;
+    --autostart)
+        # Called from the login profile.
+        [ -f "$AUTOSTART" ] || exit 0
+        is_running "$TTYD_PID" && exit 0
+        QUIET=1 start "$(cat "$AUTOSTART")" ;;
+    -h|--help|help)
+        sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' ;;
+    *) die "Unknown command '$1'. Try: remote-access help" ;;
+esac

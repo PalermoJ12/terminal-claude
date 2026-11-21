@@ -20,7 +20,9 @@ import java.io.OutputStream;
  *   <li>{@code $PREFIX/bin/claude-setup}: installs storage access, tools, a Debian environment
  *   and Claude Code.</li>
  *   <li>{@code $PREFIX/etc/profile.d/terminal-claude.sh}: runs {@code claude-setup} in the first
- *   interactive shell until setup has finished once.</li>
+ *   interactive shell until setup has finished (and again after an update changes it).</li>
+ *   <li>{@code $PREFIX/bin/remote-access}: serves the terminal to a computer over the web
+ *   (ttyd) and SSH.</li>
  * </ul>
  */
 final class ClaudeSetupInstaller {
@@ -33,6 +35,8 @@ final class ClaudeSetupInstaller {
     static void installSetupFiles(Context context) {
         copyAsset(context, "claude-setup",
             TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/claude-setup", true);
+        copyAsset(context, "remote-access",
+            TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/remote-access", true);
         copyAsset(context, "terminal-claude.sh",
             TermuxConstants.TERMUX_ETC_PREFIX_DIR_PATH + "/profile.d/terminal-claude.sh", false);
     }

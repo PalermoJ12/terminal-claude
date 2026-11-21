@@ -1,11 +1,16 @@
 # Terminal Claude: sourced by login shells from $PREFIX/etc/profile.
-# Runs the one-time Claude Code setup in the first interactive session.
+# Runs the Claude Code setup in the first interactive session, and again when
+# an app update brings a newer setup version. Must match SETUP_VERSION in
+# claude-setup.
+TERMINAL_CLAUDE_SETUP_VERSION=2
 case "$-" in
     *i*)
-        if [ ! -f "$HOME/.terminal-claude/setup-complete" ] && [ -z "$TERMINAL_CLAUDE_SETUP_RUNNING" ]; then
-            if [ -x "$PREFIX/bin/claude-setup" ]; then
-                "$PREFIX/bin/bash" "$PREFIX/bin/claude-setup"
-            fi
+        if [ -z "$TERMINAL_CLAUDE_SETUP_RUNNING" ] && [ -x "$PREFIX/bin/claude-setup" ] &&
+            [ "$(cat "$HOME/.terminal-claude/setup-complete" 2>/dev/null)" != "$TERMINAL_CLAUDE_SETUP_VERSION" ]; then
+            "$PREFIX/bin/bash" "$PREFIX/bin/claude-setup"
+        fi
+        if [ -f "$HOME/.terminal-claude/remote-access.autostart" ] && [ -x "$PREFIX/bin/remote-access" ]; then
+            "$PREFIX/bin/bash" "$PREFIX/bin/remote-access" --autostart
         fi
         ;;
 esac

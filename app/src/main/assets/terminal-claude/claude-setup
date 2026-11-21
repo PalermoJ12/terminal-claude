@@ -13,6 +13,10 @@
 # The script is safe to run again: finished steps are skipped. Run
 # `claude-setup --force` to redo every step.
 
+# Bump this (and TERMINAL_CLAUDE_SETUP_VERSION in terminal-claude.sh) when the
+# steps change, so existing installs run the new steps after an app update.
+SETUP_VERSION=2
+
 set -o pipefail
 
 PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
@@ -26,10 +30,11 @@ IMAGE="debian:stable-slim"
 TERMUX_PACKAGES=(
     proot-distro git openssh curl wget python nodejs-lts ripgrep jq
     nano vim tmux which tar unzip zip termux-api termux-tools
+    ttyd net-tools
 )
 DEBIAN_PACKAGES=(
     ca-certificates curl wget git ripgrep procps less nano openssh-client
-    python3 nodejs npm unzip xz-utils bash-completion
+    python3 nodejs npm unzip xz-utils bash-completion iproute2
 )
 
 FORCE=0
@@ -137,8 +142,14 @@ ok "Linux packages installed"
 
 # --- 4. Claude Code ---------------------------------------------------------
 step "Installing Claude Code"
+claude_installed() {
+    proot-distro login "$CONTAINER" -- sh -c \
+        'for c in /root/.local/bin/claude /usr/local/bin/claude; do [ -x "$c" ] && exit 0; done; exit 1' 2>/dev/null
+}
+if claude_installed && [ "$FORCE" = 0 ]; then
+    ok "Already installed (it updates itself)"
 # Official native installer first; npm (same native binary) as a fallback.
-if ! run proot-distro login "$CONTAINER" -- bash -c '
+elif ! run proot-distro login "$CONTAINER" -- bash -c '
     set -e
     curl -fsSL https://claude.ai/install.sh -o /tmp/claude-install.sh
     bash /tmp/claude-install.sh
@@ -159,7 +170,37 @@ exit 127
 EOF2
     chmod 755 /usr/local/bin/claude-launch
     grep -q "/.local/bin" /root/.bashrc 2>/dev/null || echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> /root/.bashrc
-' || fail "Could not create the Claude launcher."
+'' || fail "Could not create the Claude launcher."
+
+# Tell Claude about this environment, so the servers it starts can be opened in
+# the phone's browser and from other devices. Not overwritten if you edit it.
+proot-distro login "$CONTAINER" -- bash -c '
+    mkdir -p /root/.claude
+    f=/root/.claude/CLAUDE.md
+    if [ ! -f "$f" ] || grep -q "^<!-- terminal-claude:managed -->" "$f"; then
+        cat > "$f" <<"EOF2"
+<!-- terminal-claude:managed -->
+<!-- Delete the line above to keep your own edits to this file. -->
+# Environment: Terminal Claude on Android
+
+- You are running in a Debian proot environment inside the Terminal Claude
+  Android app (a Termux build). There is no root on the real device and no
+  systemd; run servers as normal foreground or background processes.
+- The network is shared with the phone. A server you start here is reachable
+  in the phone browser at http://localhost:PORT.
+- Use ports 1024 and above. Ports below 1024 are not allowed on Android.
+- Bind dev servers to 0.0.0.0 (for example `vite --host`, `next dev -H 0.0.0.0`,
+  `python3 -m http.server 8000 --bind 0.0.0.0`) so the user can also open them
+  from a computer on the same Wi-Fi at http://PHONE_IP:PORT. Run `hostname -I`
+  or `ip -4 addr` to find PHONE_IP, or tell the user to run `remote-access status`
+  in Termux.
+- The phone shared storage is at /sdcard (also /storage/emulated/0). The Termux
+  home is /data/data/com.termux/files/home.
+- Install missing tools with `apt-get install -y PACKAGE`.
+EOF2
+    fi
+' >>"$LOG_FILE" 2>&1 || warn "Could not write /root/.claude/CLAUDE.md"
+ok "Claude Code installed"
 
 # --- 5. Commands ------------------------------------------------------------
 step "Adding the 'claude' and 'claude-shell' commands"
@@ -193,7 +234,7 @@ else
     fail "Claude Code was installed but did not start (see the log)."
 fi
 
-date >"$DONE_MARKER"
+echo "$SETUP_VERSION" >"$DONE_MARKER"
 cleanup
 trap - INT TERM
 
@@ -204,6 +245,10 @@ ${bold}${green}All set!${reset}
   ${bold}claude${reset}          start Claude Code in the current folder
   ${bold}claude-shell${reset}    open a Debian shell (apt, npm, python...)
   ${bold}cd ~/storage/shared${reset}  your phone's files (Download, Documents, ...)
+  ${bold}remote-access start${reset}  use this terminal from a computer's browser or SSH
+
+Servers you (or Claude) start, like ${bold}python3 -m http.server 8000${reset} or
+${bold}npm run dev${reset}, open in the phone's browser at ${bold}http://localhost:PORT${reset}.
 
 The first time you run ${bold}claude${reset} it asks you to log in: open the link it
 shows (long-press the screen > More > Select URL), sign in, and paste the
