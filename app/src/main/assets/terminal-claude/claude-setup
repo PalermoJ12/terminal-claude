@@ -161,6 +161,8 @@ export DEBIAN_FRONTEND=noninteractive
 APT_OPTS=(-y -o Dpkg::Options::=--force-confnew -o Dpkg::Options::=--force-confdef)
 
 step "Updating the terminal's packages"
+# Finish any install that was interrupted (app closed mid-setup) before continuing.
+run dpkg --configure -a --force-confnew || true
 run pkg update "${APT_OPTS[@]}" || run pkg update "${APT_OPTS[@]}" || fail "Could not update packages."
 run pkg upgrade "${APT_OPTS[@]}" || fail "Could not upgrade packages."
 ok "Up to date"
@@ -186,9 +188,14 @@ else
 fi
 
 step "Installing Linux packages"
+# dpkg --configure -a and apt-get -f install repair an install that was
+# interrupted (app closed or updated mid-setup).
 run proot-distro login "$CONTAINER" -- env DEBIAN_FRONTEND=noninteractive bash -c "
+    opts='-y -o Dpkg::Options::=--force-confnew -o Dpkg::Options::=--force-confdef'
+    dpkg --configure -a --force-confnew || true
     apt-get update &&
-    apt-get install -y --no-install-recommends ${DEBIAN_PACKAGES[*]}
+    { apt-get install \$opts --no-install-recommends ${DEBIAN_PACKAGES[*]} ||
+      { apt-get install \$opts -f && apt-get install \$opts --no-install-recommends ${DEBIAN_PACKAGES[*]}; }; }
 " || fail "Could not install packages in the Linux environment."
 ok "Installed"
 
