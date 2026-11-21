@@ -40,9 +40,21 @@ for node in ET.parse('/tmp/ui.xml').iter('node'):
         break
 PY
 }
+# Scrolls the quick-action row so later buttons come into view.
+swipe_bar() {
+    local xy y
+    xy="$(find_text "✦ Claude")" || return
+    y="${xy#* }"
+    [ -n "$y" ] && adb shell input swipe 300 "$y" 20 "$y" 300
+    sleep 1
+}
 tap() {
     local xy
     xy="$(find_text "$1")"
+    if [ -z "$xy" ]; then
+        swipe_bar
+        xy="$(find_text "$1")"
+    fi
     if [ -n "$xy" ]; then
         adb shell input tap $xy
         echo "tapped '$1' at $xy"
@@ -77,6 +89,9 @@ echo "::endgroup::"
 shot 04-setup-finished
 check "setup completed (version '$done_version')" '[ -n "$done_version" ]'
 check "Claude Code starts" 'grep -q "^claude --version: [0-9]" "$OUT/setup.log"'
+check "keys row and theme installed" '[ "$(app_cat files/home/.termux/termux.properties | head -1)" = "# terminal-claude:managed" ] && [ "$(app_cat files/home/.termux/colors.properties | head -1)" = "# terminal-claude:managed" ]'
+check "font installed" 'adb shell run-as "$PKG" ls files/home/.termux/font.ttf >/dev/null 2>&1'
+check "no broken commands during setup" '! app_cat files/home/.terminal-claude/setup.log | grep -q "CANNOT LINK EXECUTABLE"'
 
 echo "::group::Quick actions"
 # Answer the optional GitHub sign-in question with "no".

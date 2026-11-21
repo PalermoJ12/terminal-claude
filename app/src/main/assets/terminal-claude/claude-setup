@@ -93,10 +93,15 @@ run() {
     fi
     "$@" >>"$LOG_FILE" 2>&1 </dev/null &
     local pid=$! i=0 start=$SECONDS frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    # Wait with bash's own `read -t` on a pipe nobody writes to, not the `sleep`
+    # command: while packages upgrade, external commands can briefly fail to load.
+    local tick
+    exec {tick}<> <(:)
     while kill -0 "$pid" 2>/dev/null; do
         printf '\r      %s%s%s %s%ds%s ' "$accent" "${frames:i++%10:1}" "$reset" "$dim" $((SECONDS - start)) "$reset"
-        sleep 0.2
+        read -r -t 0.2 -u "$tick" 2>/dev/null
     done
+    exec {tick}>&-
     wait "$pid"
     local rc=$?
     printf '\r\e[K'

@@ -57,13 +57,15 @@ final class ClaudeSetupInstaller {
 
     /**
      * Writes the terminal theme, font and extra keys to {@code ~/.termux} and creates
-     * {@code ~/projects}. Does nothing before the bootstrap has created the home directory.
+     * {@code ~/projects}. Does nothing before the bootstrap is installed. Creates the home
+     * directory if needed: on the first launch it doesn't exist yet when this runs.
      *
      * @return {@code true} if a file changed, so the activity styling should be reloaded.
      */
     static boolean installTerminalDefaults(Context context) {
+        if (!new File(TermuxConstants.TERMUX_PREFIX_DIR_PATH).isDirectory()) return false;
         File home = new File(TermuxConstants.TERMUX_HOME_DIR_PATH);
-        if (!home.isDirectory()) return false;
+        if (!home.isDirectory() && !home.mkdirs()) return false;
 
         //noinspection ResultOfMethodCallIgnored
         new File(home, "projects").mkdirs();

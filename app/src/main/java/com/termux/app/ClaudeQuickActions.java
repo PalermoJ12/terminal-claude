@@ -75,11 +75,12 @@ final class ClaudeQuickActions {
         addChip(row, "☰ Tabs", false, v -> mActivity.getDrawer().openDrawer(Gravity.LEFT));
         addChip(row, "GitHub", false, v -> runInNewTab("GitHub", HOME, "run", "github-login"));
         addChip(row, "Server", false, v -> showServerMenu());
-        addChip(row, "⌨ Keys", false, v -> {
+        TextView keys = addChip(row, "⌨", false, v -> {
             if (mActivity.getTermuxTerminalViewClient() != null)
                 mActivity.getTermuxTerminalViewClient().onToggleSoftKeyboardRequest();
         });
-        addChip(row, "?", false, v -> showHelp());
+        keys.setContentDescription("Show or hide the keyboard");
+        addChip(row, "?", false, v -> showHelp()).setContentDescription("Help");
     }
 
     // ---- Buttons ------------------------------------------------------------------------------
@@ -87,16 +88,17 @@ final class ClaudeQuickActions {
     private TextView addChip(LinearLayout row, String label, boolean primary, View.OnClickListener onClick) {
         TextView chip = new TextView(mActivity);
         chip.setText(label);
-        chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         chip.setTextColor(primary ? COLOR_ACCENT_TEXT : COLOR_CHIP_TEXT);
         chip.setTypeface(Typeface.DEFAULT, primary ? Typeface.BOLD : Typeface.NORMAL);
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
-        chip.setMinHeight(dp(34));
-        chip.setPadding(dp(14), dp(6), dp(14), dp(6));
+        chip.setMinHeight(dp(32));
+        chip.setMinWidth(dp(36));
+        chip.setPadding(dp(10), dp(5), dp(10), dp(5));
 
         GradientDrawable shape = new GradientDrawable();
-        shape.setCornerRadius(dp(17));
+        shape.setCornerRadius(dp(16));
         shape.setColor(primary ? COLOR_ACCENT : COLOR_CHIP);
         chip.setBackground(new RippleDrawable(ColorStateList.valueOf(COLOR_RIPPLE), shape, null));
 
@@ -106,7 +108,7 @@ final class ClaudeQuickActions {
 
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        params.setMargins(dp(3), dp(5), dp(3), dp(5));
+        params.setMargins(dp(2), dp(4), dp(2), dp(4));
         row.addView(chip, params);
         return chip;
     }
@@ -225,7 +227,8 @@ final class ClaudeQuickActions {
         "+ Tab — a new terminal tab.   ☰ Tabs — switch or close tabs.\n" +
         "GitHub — sign in, so you and Claude can clone, push and open pull requests.\n" +
         "Server — use this terminal from a computer's browser or over SSH.\n" +
-        "⌨ Keys — show or hide the keyboard.\n\n" +
+        "⌨ — show or hide the keyboard.   ? — this help.\n" +
+        "If the buttons don't all fit, swipe the row sideways.\n\n" +
         "KEYS ROW\n" +
         "ESC — stop Claude mid-answer.\n" +
         "⇧TAB — switch Claude's mode (normal, auto-accept edits, plan).\n" +

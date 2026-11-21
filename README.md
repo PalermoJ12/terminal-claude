@@ -37,8 +37,7 @@ The row of buttons above the keyboard does the common things in one tap:
 | **+ Tab** / **☰ Tabs** | Open a new terminal tab, or switch between tabs. |
 | **GitHub** | Sign in to GitHub (see [GitHub](#github)). |
 | **Server** | Use this terminal from a computer (see [Use it from a computer](#use-it-from-a-computer)). |
-| **⌨ Keys** | Show or hide the keyboard. |
-| **?** | Help: every button, key and command. |
+| **⌨** · **?** | Show or hide the keyboard · Help: every button, key and command. If the buttons don't all fit on your screen, swipe the row sideways. |
 
 Each button opens its own tab, so it never types into a tab where Claude is already running. When Claude exits, the tab stays open as a terminal in that project folder.
 

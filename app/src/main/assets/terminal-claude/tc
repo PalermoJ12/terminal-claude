@@ -108,7 +108,7 @@ ${bold}Buttons above the keyboard${reset}
   Claude   pick a project (or make/clone one) and start Claude in it
   + Tab    open another terminal tab        Tabs   switch between tabs
   GitHub   sign in to GitHub                Server use this from a computer
-  Keys     show or hide the keyboard        ?      this help
+  ⌨        show or hide the keyboard        ?      this help
 
 ${bold}Keys row${reset}
   ESC       stop Claude mid-answer          ⇧TAB  switch Claude's mode (plan, auto-accept)
