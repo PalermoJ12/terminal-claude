@@ -29,16 +29,49 @@ The download is about 300–500 MB and takes 5–15 minutes. If a step fails (us
 
 ## Use
 
+The row of buttons above the keyboard does the common things in one tap:
+
+| Button | What it does |
+|---|---|
+| **✦ Claude** | Pick a project and start Claude in it. The list has your projects (newest first), the current tab's folder, **New project…**, **Clone from GitHub…** and your phone's storage. Long-press to open just a terminal there. |
+| **+ Tab** / **☰ Tabs** | Open a new terminal tab, or switch between tabs. |
+| **GitHub** | Sign in to GitHub (see [GitHub](#github)). |
+| **Server** | Use this terminal from a computer (see [Use it from a computer](#use-it-from-a-computer)). |
+| **⌨ Keys** | Show or hide the keyboard. |
+| **?** | Help: every button, key and command. |
+
+Each button opens its own tab, so it never types into a tab where Claude is already running. When Claude exits, the tab stays open as a terminal in that project folder.
+
+The keys row is set up for Claude Code. Swipe up on a key to get the symbol shown in brackets.
+
+| Key | Use |
+|---|---|
+| **ESC** | Stop Claude mid-answer. |
+| **⇧TAB** | Switch Claude's mode (normal, auto-accept edits, plan). |
+| **/** (\\) · **@** (#) · **!** (\|) | Claude commands, mention a file, run a shell command. |
+| **↑ ↓ ← →**, **HOME** (PGUP), **END** (PGDN) | History, menus, moving the cursor. |
+| **TAB**, **CTRL** (^C), **ALT**, **-** (_) | As on a computer keyboard. |
+| **⎘** (~) | Paste. |
+
+Other things that make it easier on a phone:
+
+- **Projects** live in `~/projects`. They're fast and support everything npm and git need. They also appear in Android's Files app under "Terminal Claude". Your phone's own files are in `~/storage/shared`.
+- **Tap links** to open them, including Claude's sign-in link. **Pinch** to zoom the text. **Long-press** for copy, paste and more.
+- **The look:** a dark theme, the JetBrains Mono font, and a prompt that shows the folder and git branch. To use your own, delete the first line (`# terminal-claude:managed`) of `~/.termux/termux.properties` or `~/.termux/colors.properties` and edit them, or replace `~/.termux/font.ttf`. Run `termux-reload-settings` after editing. To keep your own prompt, put `TC_PROMPT=0` in `~/.terminal-claude/config`.
+
+From the command line:
+
 ```sh
-cd ~/storage/shared/Documents/my-project   # or any folder
-claude                                      # start Claude Code here
+tc new my-app                 # new project in ~/projects, then Claude
+tc clone owner/repo           # clone from GitHub into ~/projects, then Claude
+tc projects                   # list projects
+claude                        # Claude in the current folder (claude --resume, claude -p "..." work too)
+claude-shell                  # root shell in the Debian environment, for apt install ...
 ```
 
-- `claude` runs Claude Code in your current folder. Arguments are passed through, so `claude -p "summarize this repo"` and `claude --resume` work as usual.
-- `claude-shell` opens a root shell in the Debian environment, in your current folder. Use it for `apt install ...` if Claude needs a tool that Termux doesn't have.
-- Both Termux's home folder and your device storage (`/sdcard`, `/storage/emulated/0`) are visible inside the Debian environment at the same paths.
+Termux's home folder and your phone's storage (`/sdcard`, `/storage/emulated/0`) are visible inside the Debian environment at the same paths.
 
-**Logging in.** The first time you run `claude`, it shows a sign-in link. Tap it, or long-press the terminal and choose *More… → Select URL*, then sign in and paste the code back into the terminal. To use an API key instead, run `export ANTHROPIC_API_KEY=sk-ant-...` before `claude`. Add that line to `~/.bashrc` to keep it.
+**Signing in to Claude.** The first time, Claude shows a sign-in link. Tap it, sign in, and paste the code back into the terminal. To use an API key instead, put `export ANTHROPIC_API_KEY=sk-ant-...` in `~/.bashrc`.
 
 **Updates.** Claude Code updates itself. Run `pkg upgrade` now and then to update the Termux tools. When you install a newer APK, setup reruns automatically if anything changed. It skips the steps that are already done.
 
@@ -120,11 +153,15 @@ The changes from upstream Termux are:
 | `app/src/main/assets/terminal-claude/claude-setup` | The setup script described above, installed to `$PREFIX/bin/claude-setup`. |
 | `app/src/main/assets/terminal-claude/github-login` | The `github-login` command (GitHub CLI sign-in plus git credential and identity setup), installed to `$PREFIX/bin/`. |
 | `app/src/main/assets/terminal-claude/remote-access` | The `remote-access` command (web terminal with ttyd, SSH with sshd), installed to `$PREFIX/bin/`. |
-| `app/src/main/assets/terminal-claude/terminal-claude.sh` | Installed to `$PREFIX/etc/profile.d/`. Runs `claude-setup` in new sessions until the current setup version has finished, and starts `remote-access` if autostart is on. |
-| `app/src/main/java/com/termux/app/ClaudeSetupInstaller.java` | Copies the two files above into place when the first session starts. |
-| `app/src/main/java/com/termux/app/TermuxActivity.java` | Calls `ClaudeSetupInstaller`. |
+| `app/src/main/assets/terminal-claude/tc` | The `tc` project helper (open, new, clone, projects) that the buttons run, installed to `$PREFIX/bin/`. |
+| `app/src/main/assets/terminal-claude/terminal-claude.sh` | Installed to `$PREFIX/etc/profile.d/`. Runs `claude-setup` until the current setup version has finished, shows the welcome, sets the prompt, and starts `remote-access` if autostart is on. |
+| `app/src/main/assets/terminal-claude/termux/` | Default `termux.properties` (keys row, tap-to-open links), `colors.properties` (theme) and `font.ttf` (JetBrains Mono, OFL license alongside), installed to `~/.termux/`. |
+| `app/src/main/java/com/termux/app/ClaudeSetupInstaller.java` | Copies the scripts into place when the first session starts, and the `~/.termux` defaults unless you've made those files your own. |
+| `app/src/main/java/com/termux/app/ClaudeQuickActions.java` | The quick-action buttons and their dialogs (project picker, new project, clone, server, help). |
+| `app/src/main/java/com/termux/app/TermuxActivity.java` | Calls the two classes above. |
+| `app/src/main/res/layout/activity_termux.xml` | Adds the button row between the terminal and the keys. |
 | `app/src/main/res/values/strings.xml` | App name changed to "Terminal Claude". |
-| `.github/workflows/build-apk.yml` | Builds the APKs and publishes the release. |
+| `.github/workflows/build-apk.yml` | Builds the APKs and publishes the release, then runs `.github/scripts/emulator-test.sh`. That script installs the APK on an Android emulator, runs the real setup, taps through the buttons and saves screenshots to the git ref `refs/screenshots/latest`. |
 
 ## Notes and limitations
 

@@ -5,51 +5,131 @@ import android.content.Context;
 import com.termux.shared.logger.Logger;
 import com.termux.shared.termux.TermuxConstants;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Arrays;
 
 /**
- * Terminal Claude: copies the Claude Code setup files from the APK's assets into the Termux
- * prefix. Called each time the first terminal session is about to start, after the bootstrap is
- * installed, so the files are also refreshed when the app is updated.
+ * Terminal Claude: copies files from the APK's assets into the Termux prefix and home.
  *
+ * <p>{@link #installSetupFiles} is called each time the first terminal session is about to start,
+ * after the bootstrap is installed, so the files are refreshed when the app is updated:
  * <ul>
  *   <li>{@code $PREFIX/bin/claude-setup}: installs storage access, tools, a Debian environment
  *   and Claude Code.</li>
- *   <li>{@code $PREFIX/etc/profile.d/terminal-claude.sh}: runs {@code claude-setup} in the first
- *   interactive shell until setup has finished (and again after an update changes it).</li>
- *   <li>{@code $PREFIX/bin/remote-access}: serves the terminal to a computer over the web
- *   (ttyd) and SSH.</li>
+ *   <li>{@code $PREFIX/etc/profile.d/terminal-claude.sh}: runs {@code claude-setup} until the
+ *   current setup version has finished, shows the welcome and sets the prompt.</li>
+ *   <li>{@code $PREFIX/bin/tc}: project helper used by the quick-action buttons.</li>
+ *   <li>{@code $PREFIX/bin/remote-access}: serves the terminal to a computer (ttyd, SSH).</li>
  *   <li>{@code $PREFIX/bin/github-login}: signs in to GitHub with gh and sets up git.</li>
  * </ul>
+ *
+ * <p>{@link #installTerminalDefaults} writes the look and keyboard defaults to {@code ~/.termux}.
+ * A file is only written when it is missing or still starts with the managed marker, so edits
+ * the user makes (after deleting the marker) are kept.
  */
 final class ClaudeSetupInstaller {
 
     private static final String LOG_TAG = "ClaudeSetupInstaller";
     private static final String ASSET_DIR = "terminal-claude/";
+    private static final String MANAGED_MARKER = "# terminal-claude:managed";
+    private static final String BIN = TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH;
 
     private ClaudeSetupInstaller() {}
 
     static void installSetupFiles(Context context) {
-        copyAsset(context, "claude-setup",
-            TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/claude-setup", true);
-        copyAsset(context, "remote-access",
-            TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/remote-access", true);
-        copyAsset(context, "github-login",
-            TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/github-login", true);
+        copyAsset(context, "claude-setup", BIN + "/claude-setup", true);
+        copyAsset(context, "tc", BIN + "/tc", true);
+        copyAsset(context, "remote-access", BIN + "/remote-access", true);
+        copyAsset(context, "github-login", BIN + "/github-login", true);
         copyAsset(context, "terminal-claude.sh",
             TermuxConstants.TERMUX_ETC_PREFIX_DIR_PATH + "/profile.d/terminal-claude.sh", false);
     }
 
-    private static void copyAsset(Context context, String assetName, String destPath, boolean executable) {
+    /**
+     * Writes the terminal theme, font and extra keys to {@code ~/.termux} and creates
+     * {@code ~/projects}. Does nothing before the bootstrap has created the home directory.
+     *
+     * @return {@code true} if a file changed, so the activity styling should be reloaded.
+     */
+    static boolean installTerminalDefaults(Context context) {
+        File home = new File(TermuxConstants.TERMUX_HOME_DIR_PATH);
+        if (!home.isDirectory()) return false;
+
+        //noinspection ResultOfMethodCallIgnored
+        new File(home, "projects").mkdirs();
+
+        boolean changed = false;
+        changed |= installManagedText(context, "termux/termux.properties",
+            TermuxConstants.TERMUX_PROPERTIES_PRIMARY_FILE_PATH);
+        changed |= installManagedText(context, "termux/colors.properties",
+            TermuxConstants.TERMUX_COLOR_PROPERTIES_FILE_PATH);
+
+        // The font is binary, so it has no marker: install it once, and never again if the user
+        // removes or replaces it.
+        File font = new File(TermuxConstants.TERMUX_FONT_FILE_PATH);
+        File fontMarker = new File(home, ".terminal-claude/font-installed");
+        if (!font.exists() && !fontMarker.exists()) {
+            if (copyAsset(context, "termux/font.ttf", font.getAbsolutePath(), false)) {
+                changed = true;
+                writeQuietly(fontMarker, new byte[0]);
+            }
+        }
+        return changed;
+    }
+
+    private static boolean installManagedText(Context context, String assetName, String destPath) {
+        File dest = new File(destPath);
+        byte[] wanted;
+        try (InputStream in = context.getAssets().open(ASSET_DIR + assetName)) {
+            wanted = readAll(in);
+        } catch (IOException e) {
+            Logger.logStackTraceWithMessage(LOG_TAG, "Failed to read asset " + assetName, e);
+            return false;
+        }
+        if (dest.exists()) {
+            byte[] current;
+            try (InputStream in = new FileInputStream(dest)) {
+                current = readAll(in);
+            } catch (IOException e) {
+                return false;
+            }
+            if (!new String(current).startsWith(MANAGED_MARKER)) return false; // the user's own file
+            if (Arrays.equals(current, wanted)) return false;
+        }
+        return copyAsset(context, assetName, destPath, false);
+    }
+
+    private static byte[] readAll(InputStream in) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int read;
+        while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
+        return out.toByteArray();
+    }
+
+    private static void writeQuietly(File file, byte[] data) {
+        File parent = file.getParentFile();
+        //noinspection ResultOfMethodCallIgnored
+        if (parent != null) parent.mkdirs();
+        try (OutputStream out = new FileOutputStream(file)) {
+            out.write(data);
+        } catch (IOException e) {
+            Logger.logStackTraceWithMessage(LOG_TAG, "Failed to write " + file, e);
+        }
+    }
+
+    private static boolean copyAsset(Context context, String assetName, String destPath, boolean executable) {
         File dest = new File(destPath);
         File parent = dest.getParentFile();
         if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
             Logger.logError(LOG_TAG, "Failed to create directory " + parent);
-            return;
+            return false;
         }
         File tmp = new File(destPath + ".tmp");
         try (InputStream in = context.getAssets().open(ASSET_DIR + assetName);
@@ -61,7 +141,7 @@ final class ClaudeSetupInstaller {
             Logger.logStackTraceWithMessage(LOG_TAG, "Failed to write " + destPath, e);
             //noinspection ResultOfMethodCallIgnored
             tmp.delete();
-            return;
+            return false;
         }
         //noinspection ResultOfMethodCallIgnored
         tmp.setReadable(true, false);
@@ -73,6 +153,8 @@ final class ClaudeSetupInstaller {
             Logger.logError(LOG_TAG, "Failed to move " + tmp + " to " + dest);
             //noinspection ResultOfMethodCallIgnored
             tmp.delete();
+            return false;
         }
+        return true;
     }
 }

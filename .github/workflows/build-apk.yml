@@ -68,3 +68,53 @@ jobs:
           Uninstall Termux first if you have it installed (same package name, different signing key).
           On first launch the app sets up storage access, a Debian environment and Claude Code automatically.
           See the README for details."
+
+  # Installs the APK on an Android emulator, lets the real first-run setup
+  # install Claude Code, taps through the buttons and takes screenshots. The
+  # screenshots are pushed to the ref refs/screenshots/latest (not a branch):
+  #   git fetch origin refs/screenshots/latest && git checkout FETCH_HEAD
+  emulator-test:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download APKs
+        uses: actions/download-artifact@v5
+        with:
+          name: terminal-claude-apks
+          path: dist
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          ram-size: 4096M
+          disk-size: 8G
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
+          script: bash .github/scripts/emulator-test.sh
+
+      - name: Publish screenshots
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          [ -d screenshots ] || exit 0
+          cd screenshots
+          git init -q
+          git add -A
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qm "Emulator screenshots for ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/screenshots/latest

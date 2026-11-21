@@ -205,6 +205,9 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
         // Delete ReportInfo serialized object files from cache older than 14 days
         ReportActivity.deleteReportInfoFilesOlderThanXDays(this, 14, false);
 
+        // Terminal Claude: theme, font and keys defaults (no-op before the first bootstrap).
+        ClaudeSetupInstaller.installTerminalDefaults(this);
+
         // Load Termux app SharedProperties from disk
         mProperties = TermuxAppSharedProperties.getProperties();
         reloadProperties();
@@ -250,6 +253,9 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
         setNewSessionButtonView();
 
         setToggleKeyboardView();
+
+        // Terminal Claude: the quick-action buttons above the keys.
+        new ClaudeQuickActions(this).setup();
 
         registerForContextMenu(mTerminalView);
 
@@ -400,6 +406,7 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
                     if (mTermuxService == null) return; // Activity might have been destroyed.
                     // Terminal Claude: make sure the Claude Code setup scripts are in place.
                     ClaudeSetupInstaller.installSetupFiles(TermuxActivity.this);
+                    boolean stylingChanged = ClaudeSetupInstaller.installTerminalDefaults(TermuxActivity.this);
                     try {
                         boolean launchFailsafe = false;
                         if (intent != null && intent.getExtras() != null) {
@@ -409,6 +416,9 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
                     } catch (WindowManager.BadTokenException e) {
                         // Activity finished - ignore.
                     }
+                    // First launch: the theme, font and keys were just written, so apply them.
+                    // The session keeps running while the activity is recreated.
+                    if (stylingChanged) reloadActivityStyling(true);
                 });
             } else {
                 // The service connected while not in foreground - just bail out.

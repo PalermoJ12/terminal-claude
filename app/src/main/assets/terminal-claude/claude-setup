@@ -3,19 +3,20 @@
 #
 # Installs everything needed to run Claude Code on this device:
 #   1. Asks for access to your device storage (so Claude can work on your files).
-#   2. Updates Termux packages and installs common developer tools.
-#   3. Creates a small Debian Linux environment with proot-distro. Claude Code
+#   2-3. Updates Termux packages and installs common developer tools.
+#   4-5. Creates a small Debian Linux environment with proot-distro. Claude Code
 #      only ships Linux (glibc) binaries, not Android ones, so it runs in there.
-#   4. Installs Claude Code inside that environment with the official installer.
-#   5. Adds a `claude` command to Termux that runs Claude Code in your
-#      current directory, with your Termux home and /sdcard visible to it.
+#   6. Installs Claude Code inside that environment with the official installer.
+#   7. Adds the `claude` and `claude-shell` commands, which run in your current
+#      directory with your Termux home, /sdcard and GitHub sign-in shared.
 #
-# The script is safe to run again: finished steps are skipped. Run
-# `claude-setup --force` to redo every step.
+# Safe to run again: finished steps are skipped.
+#   claude-setup --force     redo every step
+#   claude-setup --verbose   show the full install output instead of a spinner
 
-# Bump this (and TERMINAL_CLAUDE_SETUP_VERSION in terminal-claude.sh) when the
-# steps change, so existing installs run the new steps after an app update.
-SETUP_VERSION=3
+# Bump this when the steps change, so existing installs run the new steps after
+# an app update (terminal-claude.sh and tc compare it with setup-complete).
+SETUP_VERSION=4
 
 set -o pipefail
 
@@ -26,6 +27,7 @@ LOCK_DIR="$STATE_DIR/setup.lock"
 DONE_MARKER="$STATE_DIR/setup-complete"
 CONTAINER="claude-env"
 IMAGE="debian:stable-slim"
+TOTAL_STEPS=7
 
 TERMUX_PACKAGES=(
     proot-distro git openssh curl wget python nodejs-lts ripgrep jq
@@ -37,25 +39,58 @@ DEBIAN_PACKAGES=(
     python3 nodejs npm unzip xz-utils bash-completion iproute2 gh
 )
 
-FORCE=0
-[ "$1" = "--force" ] && FORCE=1
+FORCE=0; VERBOSE=0
+for arg in "$@"; do
+    case "$arg" in
+        --force) FORCE=1 ;;
+        --verbose|-v) VERBOSE=1 ;;
+    esac
+done
+[ -t 1 ] || VERBOSE=1   # no spinner when output isn't a terminal
 
-bold=$'\e[1m'; green=$'\e[32m'; yellow=$'\e[33m'; red=$'\e[31m'; cyan=$'\e[36m'; reset=$'\e[0m'
+bold=$'\e[1m'; dim=$'\e[2m'; green=$'\e[32m'; yellow=$'\e[33m'; red=$'\e[31m'
+accent=$'\e[38;5;173m'; reset=$'\e[0m'
 
-step()  { printf '\n%s==> %s%s\n' "$bold$cyan" "$*" "$reset"; echo "==> $*" >>"$LOG_FILE"; }
-ok()    { printf '%s  ✓ %s%s\n' "$green" "$*" "$reset"; }
-warn()  { printf '%s  ! %s%s\n' "$yellow" "$*" "$reset"; echo "WARN: $*" >>"$LOG_FILE"; }
-fail()  {
-    printf '\n%s✗ %s%s\n' "$red" "$*" "$reset"
+STEP_NUM=0
+STEP_TITLE=""
+step() {
+    STEP_NUM=$((STEP_NUM + 1))
+    STEP_TITLE="$1"
+    printf '\n%s[%d/%d]%s %s%s%s\n' "$accent" "$STEP_NUM" "$TOTAL_STEPS" "$reset" "$bold" "$1" "$reset"
+    echo "==> [$STEP_NUM/$TOTAL_STEPS] $1" >>"$LOG_FILE"
+}
+ok()   { printf '      %s✓%s %s\n' "$green" "$reset" "$*"; }
+note() { printf '      %s%s%s\n' "$dim" "$*" "$reset"; }
+warn() { printf '      %s! %s%s\n' "$yellow" "$*" "$reset"; echo "WARN: $*" >>"$LOG_FILE"; }
+fail() {
+    printf '\n%s✗ %s%s\n' "$red$bold" "$*" "$reset"
     echo "ERROR: $*" >>"$LOG_FILE"
-    printf 'Full log: %s\n' "$LOG_FILE"
-    printf 'Fix the problem (usually: check your internet connection) and run %sclaude-setup%s to retry.\n' "$bold" "$reset"
+    printf '\n%sLast lines of the log:%s\n' "$dim" "$reset"
+    tail -n 12 "$LOG_FILE" | sed 's/^/  /'
+    printf '\nUsually this is a dropped internet connection. Run %sclaude-setup%s to try again;\n' "$bold" "$reset"
+    printf 'finished steps are skipped. Full log: %s\n' "${LOG_FILE/#$HOME/\~}"
     cleanup
     exit 1
 }
 
-# Run a command, showing its output and appending it to the log.
-run() { "$@" 2>&1 | tee -a "$LOG_FILE"; return "${PIPESTATUS[0]}"; }
+# Runs a command with its output going to the log, showing a spinner and the
+# elapsed time. With --verbose, the output is shown too.
+run() {
+    if [ "$VERBOSE" = 1 ]; then
+        "$@" 2>&1 | tee -a "$LOG_FILE"
+        return "${PIPESTATUS[0]}"
+    fi
+    "$@" >>"$LOG_FILE" 2>&1 </dev/null &
+    local pid=$! i=0 start=$SECONDS frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    while kill -0 "$pid" 2>/dev/null; do
+        printf '\r      %s%s%s %s%ds%s ' "$accent" "${frames:i++%10:1}" "$reset" "$dim" $((SECONDS - start)) "$reset"
+        sleep 0.2
+    done
+    wait "$pid"
+    local rc=$?
+    printf '\r\e[K'
+    return $rc
+}
 
 cleanup() {
     command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock >/dev/null 2>&1
@@ -64,89 +99,96 @@ cleanup() {
 
 mkdir -p "$STATE_DIR"
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    echo "Claude setup is already running in another session. Wait for it to finish there."
-    echo "(If it is not running, delete $LOCK_DIR and try again.)"
+    echo "Setup is already running in another tab. Open it with the Tabs button."
+    echo "${dim}(If it isn't running, delete $LOCK_DIR and try again.)${reset}"
     exit 1
 fi
-trap 'cleanup; exit 130' INT TERM
+trap 'printf "\n"; cleanup; exit 130' INT TERM
 export TERMINAL_CLAUDE_SETUP_RUNNING=1
 echo "--- claude-setup started $(date) ---" >>"$LOG_FILE"
 
+clear 2>/dev/null
 cat <<EOF
+${accent}${bold}✦ Setting up Terminal Claude${reset}
 
-${bold}Terminal Claude setup${reset}
-This downloads about 300-500 MB and takes 5-15 minutes on the first launch.
-Keep the app open and stay connected to the internet. Log: $LOG_FILE
+This installs Claude Code and developer tools (about 300-500 MB).
+It takes 5-15 minutes the first time. Keep the app open and stay online.
 EOF
 
 # Keep the device from sleeping and killing the download.
 command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock >/dev/null 2>&1
 
-# --- 0. CPU check -----------------------------------------------------------
 case "$(uname -m)" in
     aarch64|x86_64) ;;
     *) fail "This device's CPU ($(uname -m)) is 32-bit. Claude Code needs a 64-bit (arm64 or x86_64) device." ;;
 esac
 
+mkdir -p "$HOME/projects"
+touch "$HOME/.hushlogin"   # the welcome banner comes from terminal-claude.sh instead
+
 # --- 1. Storage access ------------------------------------------------------
-step "Storage access"
+step "Access to your phone's files"
 if [ -d "$HOME/storage/shared" ] && [ "$FORCE" = 0 ]; then
-    ok "Already granted (~/storage/shared -> /sdcard)"
+    ok "Already allowed"
 else
-    echo "Android will ask for permission to access your files. Tap 'Allow'."
+    note "Android will ask for permission. Tap Allow."
     termux-setup-storage >/dev/null 2>&1
     for _ in $(seq 1 30); do
         [ -d "$HOME/storage/shared" ] && break
         sleep 1
     done
     if [ -d "$HOME/storage/shared" ]; then
-        ok "Granted: your files are at ~/storage/shared (and /sdcard inside Claude)"
+        ok "Allowed: your files are in ~/storage/shared"
     else
-        warn "Storage permission not granted yet. Run 'termux-setup-storage' later to allow it."
+        warn "Not allowed yet. Run termux-setup-storage later to allow it."
     fi
 fi
 
-# --- 2. Termux packages -----------------------------------------------------
+# --- 2-3. Termux packages ---------------------------------------------------
 export DEBIAN_FRONTEND=noninteractive
 APT_OPTS=(-y -o Dpkg::Options::=--force-confnew -o Dpkg::Options::=--force-confdef)
 
-step "Updating Termux packages"
-run pkg update "${APT_OPTS[@]}" || run pkg update "${APT_OPTS[@]}" || fail "Could not update Termux packages."
-run pkg upgrade "${APT_OPTS[@]}" || fail "Could not upgrade Termux packages."
-ok "Termux packages are up to date"
+step "Updating the terminal's packages"
+run pkg update "${APT_OPTS[@]}" || run pkg update "${APT_OPTS[@]}" || fail "Could not update packages."
+run pkg upgrade "${APT_OPTS[@]}" || fail "Could not upgrade packages."
+ok "Up to date"
 
-step "Installing tools: ${TERMUX_PACKAGES[*]}"
-run pkg install "${APT_OPTS[@]}" "${TERMUX_PACKAGES[@]}" || fail "Could not install Termux packages."
-ok "Tools installed"
+step "Installing developer tools"
+note "git, GitHub CLI, Node.js, Python, ripgrep, nano, vim, tmux, ssh, ..."
+run pkg install "${APT_OPTS[@]}" "${TERMUX_PACKAGES[@]}" || fail "Could not install the tools."
+ok "Installed"
 
-# --- 3. Debian environment --------------------------------------------------
-step "Creating the Linux environment for Claude ($IMAGE)"
+# --- 4-5. Debian environment ------------------------------------------------
+step "Creating the Linux environment for Claude"
 container_ok() { proot-distro login "$CONTAINER" -- true >/dev/null 2>&1; }
 if container_ok && [ "$FORCE" = 0 ]; then
-    ok "Already installed"
+    ok "Already created"
 else
+    note "Downloading Debian. This is the longest step."
     if [ "$FORCE" = 1 ] && container_ok; then
         run proot-distro remove "$CONTAINER" || true
     fi
-    run proot-distro install --name "$CONTAINER" "$IMAGE" || fail "Could not install the Debian environment."
-    container_ok || fail "The Debian environment was installed but does not start."
-    ok "Debian environment ready"
+    run proot-distro install --name "$CONTAINER" "$IMAGE" || fail "Could not create the Linux environment."
+    container_ok || fail "The Linux environment was created but does not start."
+    ok "Created"
 fi
 
-step "Installing Linux packages inside the environment"
+step "Installing Linux packages"
 run proot-distro login "$CONTAINER" -- env DEBIAN_FRONTEND=noninteractive bash -c "
     apt-get update &&
     apt-get install -y --no-install-recommends ${DEBIAN_PACKAGES[*]}
-" || fail "Could not install packages inside the Debian environment."
-ok "Linux packages installed"
+" || fail "Could not install packages in the Linux environment."
+ok "Installed"
 
-# --- 4. Claude Code ---------------------------------------------------------
+# --- 6. Claude Code ---------------------------------------------------------
 step "Installing Claude Code"
 claude_installed() {
     proot-distro login "$CONTAINER" -- sh -c \
         'for c in /root/.local/bin/claude /usr/local/bin/claude; do [ -x "$c" ] && exit 0; done; exit 1' 2>/dev/null
 }
+claude_new=1
 if claude_installed && [ "$FORCE" = 0 ]; then
+    claude_new=0
     ok "Already installed (it updates itself)"
 # Official native installer first; npm (same native binary) as a fallback.
 elif ! run proot-distro login "$CONTAINER" -- bash -c '
@@ -170,7 +212,7 @@ exit 127
 EOF2
     chmod 755 /usr/local/bin/claude-launch
     grep -q "/.local/bin" /root/.bashrc 2>/dev/null || echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> /root/.bashrc
-'' || fail "Could not create the Claude launcher."
+' || fail "Could not create the Claude launcher."
 
 # Tell Claude about this environment, so the servers it starts can be opened in
 # the phone's browser and from other devices. Not overwritten if you edit it.
@@ -184,8 +226,14 @@ proot-distro login "$CONTAINER" -- bash -c '
 # Environment: Terminal Claude on Android
 
 - You are running in a Debian proot environment inside the Terminal Claude
-  Android app (a Termux build). There is no root on the real device and no
-  systemd; run servers as normal foreground or background processes.
+  Android app (a Termux build), on a phone. There is no root on the real device
+  and no systemd; run servers as normal foreground or background processes.
+- The user is on a small touch screen: keep answers and summaries short, and
+  prefer making changes over printing long code blocks for them to copy.
+- Projects live in /data/data/com.termux/files/home/projects (~/projects in
+  Termux). The phone shared storage is at /sdcard (also /storage/emulated/0);
+  it does not support symlinks or executable bits, so do not run npm install
+  or create virtualenvs there.
 - The network is shared with the phone. A server you start here is reachable
   in the phone browser at http://localhost:PORT.
 - Use ports 1024 and above. Ports below 1024 are not allowed on Android.
@@ -194,19 +242,17 @@ proot-distro login "$CONTAINER" -- bash -c '
   from a computer on the same Wi-Fi at http://PHONE_IP:PORT. Run `hostname -I`
   or `ip -4 addr` to find PHONE_IP, or tell the user to run `remote-access status`
   in Termux.
-- The phone shared storage is at /sdcard (also /storage/emulated/0). The Termux
-  home is /data/data/com.termux/files/home.
 - Install missing tools with `apt-get install -y PACKAGE`.
 - GitHub: `git` and the GitHub CLI `gh` are installed and share the sign-in
   made with `github-login` in Termux. If `gh auth status` says you are not
-  signed in, ask the user to run `github-login` in a Termux session.
+  signed in, ask the user to tap the GitHub button (or run `github-login`).
 EOF2
     fi
-' >>"$LOG_FILE" 2>&1 || warn "Could not write /root/.claude/CLAUDE.md"
-ok "Claude Code installed"
+'' >>"$LOG_FILE" 2>&1 || warn "Could not write /root/.claude/CLAUDE.md"
+[ "$claude_new" = 1 ] && ok "Installed"
 
-# --- 5. Commands ------------------------------------------------------------
-step "Adding the 'claude' and 'claude-shell' commands"
+# --- 7. Commands ------------------------------------------------------------
+step "Finishing up"
 cat >"$PREFIX/bin/claude" <<'WRAPPER'
 #!/data/data/com.termux/files/usr/bin/bash
 # Terminal Claude: runs Claude Code inside the claude-env Debian environment,
@@ -234,44 +280,35 @@ exec proot-distro login claude-env --shared-tmp --work-dir "$WD" \
     "$@"
 WRAPPER
 chmod 755 "$PREFIX/bin/claude" "$PREFIX/bin/claude-shell"
-ok "Commands added"
-
-step "Checking that Claude Code starts"
 if version="$(bash "$PREFIX/bin/claude" --version 2>>"$LOG_FILE")"; then
-    ok "Claude Code $version"
+    echo "claude --version: $version" >>"$LOG_FILE"
+    ok "Claude Code ${version%% *} is ready"
 else
-    fail "Claude Code was installed but did not start (see the log)."
+    fail "Claude Code was installed but did not start."
 fi
 
 echo "$SETUP_VERSION" >"$DONE_MARKER"
 cleanup
 trap - INT TERM
 
-# --- 6. GitHub (optional) ---------------------------------------------------
+# --- GitHub (optional) ------------------------------------------------------
 if [ -t 0 ] && ! gh auth status --hostname github.com >/dev/null 2>&1; then
     echo
-    read -r -p "${bold}Sign in to GitHub now, so you and Claude can clone and push? [y/N]${reset} " answer
+    read -r -p "Sign in to GitHub now, so you and Claude can clone and push? [y/N] " answer
     case "$answer" in
-        [yY]*) "$PREFIX/bin/bash" "$PREFIX/bin/github-login" || warn "GitHub sign-in skipped. Run github-login later." ;;
-        *) echo "Skipped. Run ${bold}github-login${reset} any time." ;;
+        [yY]*) "$PREFIX/bin/bash" "$PREFIX/bin/github-login" || warn "Skipped. Tap GitHub later." ;;
+        *) note "Skipped. Tap the GitHub button any time." ;;
     esac
 fi
 
 cat <<EOF
 
-${bold}${green}All set!${reset}
+${green}${bold}✓ All set!${reset}
 
-  ${bold}claude${reset}          start Claude Code in the current folder
-  ${bold}claude-shell${reset}    open a Debian shell (apt, npm, python...)
-  ${bold}cd ~/storage/shared${reset}  your phone's files (Download, Documents, ...)
-  ${bold}remote-access start${reset}  use this terminal from a computer's browser or SSH
-  ${bold}github-login${reset}    connect GitHub (git push, gh, pull requests)
+  Tap ${accent}${bold}✦ Claude${reset} below to pick a project and start coding,
+  or type ${bold}claude${reset} here. Tap ${bold}?${reset} for everything else.
 
-Servers you (or Claude) start, like ${bold}python3 -m http.server 8000${reset} or
-${bold}npm run dev${reset}, open in the phone's browser at ${bold}http://localhost:PORT${reset}.
-
-The first time you run ${bold}claude${reset} it asks you to log in: open the link it
-shows (long-press the screen > More > Select URL), sign in, and paste the
-code back. Or set ANTHROPIC_API_KEY to use an API key.
+  The first time, Claude asks you to sign in: tap the link it shows,
+  sign in, and paste the code back here.
 
 EOF

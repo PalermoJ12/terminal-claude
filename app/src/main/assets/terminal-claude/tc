@@ -1,0 +1,144 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Terminal Claude helper. The buttons above the keyboard call this, and you can too.
+#
+#   tc open DIR           start Claude in DIR, then leave a shell there
+#   tc shell DIR          open a shell in DIR
+#   tc new NAME           create ~/projects/NAME (with git) and start Claude in it
+#   tc clone REPO         clone OWNER/REPO or a git URL into ~/projects and start Claude
+#   tc projects           list your projects
+#   tc run COMMAND...     run a command, then leave a shell
+#   tc help               show what the app can do
+
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+PROJECTS="$HOME/projects"
+STATE_DIR="$HOME/.terminal-claude"
+bold=$'\e[1m'; dim=$'\e[2m'; accent=$'\e[38;5;173m'; red=$'\e[31m'; reset=$'\e[0m'
+
+# A shell in the current directory, without the welcome banner. Used at the end
+# of every action so the tab stays open and usable.
+stay() { export TC_NO_WELCOME=1; exec "$PREFIX/bin/bash" -l; }
+
+fail() { printf '%s%s%s\n' "$red" "$*" "$reset" >&2; stay; }
+
+setup_version() { sed -n 's/^SETUP_VERSION=//p' "$PREFIX/bin/claude-setup" 2>/dev/null | head -1; }
+
+# Makes sure first-run setup has finished before Claude is used.
+ensure_setup() {
+    [ "$(cat "$STATE_DIR/setup-complete" 2>/dev/null)" = "$(setup_version)" ] && return 0
+    if [ -d "$STATE_DIR/setup.lock" ]; then
+        echo "${bold}Setup is still running in the first tab.${reset}"
+        echo "Open it with the ${bold}Tabs${reset} button, wait for \"All set!\", then try again."
+        return 1
+    fi
+    "$PREFIX/bin/bash" "$PREFIX/bin/claude-setup"
+}
+
+start_claude() {
+    local dir="$1"
+    cd "$dir" 2>/dev/null || fail "Folder not found: $dir"
+    printf '%s✦ Claude%s in %s%s%s\n' "$accent$bold" "$reset" "$bold" "${PWD/#$HOME/\~}" "$reset"
+    printf '%sType /help for commands, Esc to interrupt, Ctrl+D twice to quit.%s\n\n' "$dim" "$reset"
+    if ensure_setup; then
+        "$PREFIX/bin/claude"
+        echo
+        echo "${dim}Claude closed. You're in a shell in this folder. Type ${reset}claude${dim} to start it again.${reset}"
+    else
+        echo "${dim}You're in a shell in this folder. Type ${reset}claude${dim} once setup has finished.${reset}"
+    fi
+    stay
+}
+
+valid_name() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; }
+
+cmd_new() {
+    local name="$1"
+    valid_name "$name" || fail "Use letters, numbers, '.', '-' or '_' for the project name."
+    mkdir -p "$PROJECTS"
+    if [ -e "$PROJECTS/$name" ]; then
+        echo "Project $name already exists; opening it."
+    else
+        mkdir "$PROJECTS/$name" && (cd "$PROJECTS/$name" && git init -q 2>/dev/null)
+        echo "Created ${bold}~/projects/$name${reset}"
+    fi
+    start_claude "$PROJECTS/$name"
+}
+
+cmd_clone() {
+    local repo="$1" url name
+    repo="${repo%/}"
+    case "$repo" in
+        "") fail "Give a repository, like octocat/hello-world or a git URL." ;;
+        http://*|https://*|git@*|ssh://*) url="$repo" ;;
+        github.com/*) url="https://$repo" ;;
+        */*) url="https://github.com/$repo" ;;
+        *) fail "Use OWNER/REPO (like octocat/hello-world) or a full git URL." ;;
+    esac
+    name="$(basename "${url%.git}")"
+    mkdir -p "$PROJECTS"
+    if [ -d "$PROJECTS/$name/.git" ]; then
+        echo "${bold}$name${reset} is already cloned; opening it."
+    else
+        echo "Cloning ${bold}$url${reset} into ~/projects/$name ..."
+        git clone "$url" "$PROJECTS/$name" || {
+            echo
+            echo "If it's a private repo, sign in first: tap ${bold}GitHub${reset} (or run github-login)."
+            stay
+        }
+    fi
+    start_claude "$PROJECTS/$name"
+}
+
+cmd_projects() {
+    mkdir -p "$PROJECTS"
+    local found=0 d branch
+    for d in $(ls -t "$PROJECTS" 2>/dev/null); do
+        [ -d "$PROJECTS/$d" ] || continue
+        found=1
+        branch="$(git -C "$PROJECTS/$d" symbolic-ref --short HEAD 2>/dev/null)"
+        printf '  %s%-24s%s %s\n' "$bold" "$d" "$reset" "${branch:+$dim($branch)$reset}"
+    done
+    [ "$found" = 1 ] || echo "No projects yet. Create one with: tc new my-app"
+}
+
+cmd_help() {
+    cat <<EOF
+${accent}${bold}✦ Terminal Claude${reset}
+
+${bold}Buttons above the keyboard${reset}
+  Claude   pick a project (or make/clone one) and start Claude in it
+  + Tab    open another terminal tab        Tabs   switch between tabs
+  GitHub   sign in to GitHub                Server use this from a computer
+  Keys     show or hide the keyboard        ?      this help
+
+${bold}Keys row${reset}
+  ESC       stop Claude mid-answer          ⇧TAB  switch Claude's mode (plan, auto-accept)
+  / @ !     Claude commands, files, shell   ⎘     paste
+  Swipe up on a key for its second symbol (e.g. - gives _). Pinch to zoom text.
+
+${bold}Commands${reset}
+  claude               start Claude here       claude-shell   Debian shell (apt, ...)
+  tc new NAME          new project             tc clone OWNER/REPO
+  tc projects          list projects           github-login   connect GitHub
+  remote-access start  open from a computer    claude-setup   repair/redo setup
+
+${bold}Where things are${reset}
+  ~/projects           your projects (fast; best for code)
+  ~/storage/shared     your phone's files (Download, Documents, ...)
+  Your projects also show up in Android's Files app, under "Terminal Claude".
+
+${bold}Previewing what you build${reset}
+  Servers you start (npm run dev, python3 -m http.server 8000) open in the
+  phone's browser at http://localhost:PORT. Use ports 1024 and above.
+EOF
+}
+
+case "$1" in
+    open)     start_claude "${2:-$PWD}" ;;
+    shell)    cd "${2:-$HOME}" 2>/dev/null || fail "Folder not found: $2"; stay ;;
+    new)      cmd_new "$2" ;;
+    clone)    cmd_clone "$2" ;;
+    projects|ls) cmd_projects ;;
+    run)      shift; "$@"; echo; stay ;;
+    help|-h|--help|"") cmd_help ;;
+    *)        echo "Unknown command: $1"; echo; cmd_help; exit 1 ;;
+esac
