@@ -15,7 +15,7 @@
 
 # Bump this (and TERMINAL_CLAUDE_SETUP_VERSION in terminal-claude.sh) when the
 # steps change, so existing installs run the new steps after an app update.
-SETUP_VERSION=2
+SETUP_VERSION=3
 
 set -o pipefail
 
@@ -30,11 +30,11 @@ IMAGE="debian:stable-slim"
 TERMUX_PACKAGES=(
     proot-distro git openssh curl wget python nodejs-lts ripgrep jq
     nano vim tmux which tar unzip zip termux-api termux-tools
-    ttyd net-tools
+    ttyd net-tools gh
 )
 DEBIAN_PACKAGES=(
     ca-certificates curl wget git ripgrep procps less nano openssh-client
-    python3 nodejs npm unzip xz-utils bash-completion iproute2
+    python3 nodejs npm unzip xz-utils bash-completion iproute2 gh
 )
 
 FORCE=0
@@ -197,6 +197,9 @@ proot-distro login "$CONTAINER" -- bash -c '
 - The phone shared storage is at /sdcard (also /storage/emulated/0). The Termux
   home is /data/data/com.termux/files/home.
 - Install missing tools with `apt-get install -y PACKAGE`.
+- GitHub: `git` and the GitHub CLI `gh` are installed and share the sign-in
+  made with `github-login` in Termux. If `gh auth status` says you are not
+  signed in, ask the user to run `github-login` in a Termux session.
 EOF2
     fi
 ' >>"$LOG_FILE" 2>&1 || warn "Could not write /root/.claude/CLAUDE.md"
@@ -208,21 +211,27 @@ cat >"$PREFIX/bin/claude" <<'WRAPPER'
 #!/data/data/com.termux/files/usr/bin/bash
 # Terminal Claude: runs Claude Code inside the claude-env Debian environment,
 # starting in your current directory. Termux's home and your device storage
-# (/sdcard, /storage/emulated/0) are shared with the environment.
+# (/sdcard, /storage/emulated/0) are shared with the environment, and so are
+# the GitHub sign-in (gh) and ~/.gitconfig.
 WD="$(pwd -P 2>/dev/null || echo "$HOME")"
 exec proot-distro login claude-env \
     --shared-tmp \
     --work-dir "$WD" \
     --env BROWSER=termux-open-url \
     --env TERMUX_HOME="$HOME" \
+    --env GH_CONFIG_DIR="$HOME/.config/gh" \
+    --env GIT_CONFIG_GLOBAL="$HOME/.gitconfig" \
     -- /usr/local/bin/claude-launch "$@"
 WRAPPER
 cat >"$PREFIX/bin/claude-shell" <<'WRAPPER'
 #!/data/data/com.termux/files/usr/bin/bash
 # Terminal Claude: opens a shell in the Debian environment Claude runs in,
-# in your current directory.
+# in your current directory. Shares the GitHub sign-in and git config with Termux.
 WD="$(pwd -P 2>/dev/null || echo "$HOME")"
-exec proot-distro login claude-env --shared-tmp --work-dir "$WD" "$@"
+exec proot-distro login claude-env --shared-tmp --work-dir "$WD" \
+    --env GH_CONFIG_DIR="$HOME/.config/gh" \
+    --env GIT_CONFIG_GLOBAL="$HOME/.gitconfig" \
+    "$@"
 WRAPPER
 chmod 755 "$PREFIX/bin/claude" "$PREFIX/bin/claude-shell"
 ok "Commands added"
@@ -238,6 +247,16 @@ echo "$SETUP_VERSION" >"$DONE_MARKER"
 cleanup
 trap - INT TERM
 
+# --- 6. GitHub (optional) ---------------------------------------------------
+if [ -t 0 ] && ! gh auth status --hostname github.com >/dev/null 2>&1; then
+    echo
+    read -r -p "${bold}Sign in to GitHub now, so you and Claude can clone and push? [y/N]${reset} " answer
+    case "$answer" in
+        [yY]*) "$PREFIX/bin/bash" "$PREFIX/bin/github-login" || warn "GitHub sign-in skipped. Run github-login later." ;;
+        *) echo "Skipped. Run ${bold}github-login${reset} any time." ;;
+    esac
+fi
+
 cat <<EOF
 
 ${bold}${green}All set!${reset}
@@ -246,6 +265,7 @@ ${bold}${green}All set!${reset}
   ${bold}claude-shell${reset}    open a Debian shell (apt, npm, python...)
   ${bold}cd ~/storage/shared${reset}  your phone's files (Download, Documents, ...)
   ${bold}remote-access start${reset}  use this terminal from a computer's browser or SSH
+  ${bold}github-login${reset}    connect GitHub (git push, gh, pull requests)
 
 Servers you (or Claude) start, like ${bold}python3 -m http.server 8000${reset} or
 ${bold}npm run dev${reset}, open in the phone's browser at ${bold}http://localhost:PORT${reset}.

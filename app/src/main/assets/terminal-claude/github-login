@@ -1,0 +1,86 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Terminal Claude: connect GitHub.
+#
+#   github-login            sign in to GitHub and set up git (push, pull, clone)
+#   github-login --status   show the signed-in account
+#   github-login --logout   sign out
+#
+# Uses the GitHub CLI (gh). The sign-in and ~/.gitconfig are shared with the
+# Debian environment Claude runs in, so `git push` and `gh pr create` work in
+# Termux, in claude-shell and for Claude Code itself. The token is kept in
+# ~/.config/gh/hosts.yml (app-private storage) rather than a system keyring,
+# which Android doesn't have and the Debian environment couldn't read.
+
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+bold=$'\e[1m'; green=$'\e[32m'; yellow=$'\e[33m'; red=$'\e[31m'; reset=$'\e[0m'
+die() { printf '%s%s%s\n' "$red" "$*" "$reset" >&2; exit 1; }
+
+missing=()
+command -v gh >/dev/null 2>&1 || missing+=(gh)
+command -v git >/dev/null 2>&1 || missing+=(git)
+if [ ${#missing[@]} -gt 0 ]; then
+    echo "Installing ${missing[*]}..."
+    pkg install -y "${missing[@]}" || die "Could not install ${missing[*]}."
+fi
+
+case "$1" in
+    --status) exec gh auth status --hostname github.com ;;
+    --logout) exec gh auth logout --hostname github.com ;;
+    -h|--help|help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    "") ;;
+    *) die "Unknown option '$1'. Try: github-login --help" ;;
+esac
+
+if gh auth status --hostname github.com >/dev/null 2>&1; then
+    echo "${green}Already signed in to GitHub.${reset} (github-login --logout to switch accounts)"
+else
+    [ -t 0 ] || die "Run github-login in the terminal to sign in."
+    cat <<EOF
+${bold}Sign in to GitHub${reset}
+1. GitHub CLI shows a one-time code. Long-press to copy it (or remember it).
+2. Press Enter. GitHub opens in your browser.
+3. Paste the code, approve, then come back to this app.
+
+EOF
+    BROWSER=termux-open-url gh auth login \
+        --hostname github.com --git-protocol https --web --scopes workflow \
+        --insecure-storage \
+        || die "GitHub sign-in did not finish. Run github-login to try again."
+fi
+
+# Let git use the gh sign-in. A plain `gh` (not an absolute path) works both in
+# Termux and inside the Debian environment, which each have their own gh.
+for host in https://github.com https://gist.github.com; do
+    git config --global --unset-all "credential.$host.helper" 2>/dev/null
+    git config --global --add "credential.$host.helper" ''
+    git config --global --add "credential.$host.helper" '!gh auth git-credential'
+done
+
+# Commit identity, if none is set yet: your GitHub name and private noreply email.
+if [ -z "$(git config --global user.name)" ] || [ -z "$(git config --global user.email)" ]; then
+    if info="$(gh api user --jq '[.login, (.name // .login), (.id | tostring)] | join("\t")' 2>/dev/null)"; then
+        IFS=$'\t' read -r login name id <<<"$info"
+        [ -n "$(git config --global user.name)" ] || git config --global user.name "$name"
+        [ -n "$(git config --global user.email)" ] || git config --global user.email "$id+$login@users.noreply.github.com"
+    else
+        echo "${yellow}Could not read your GitHub profile. Set your commit identity with:${reset}"
+        echo "    git config --global user.name \"Your Name\""
+        echo "    git config --global user.email you@example.com"
+    fi
+fi
+
+# Repos on shared storage (/sdcard) are owned by another Android user, which git
+# refuses by default ("dubious ownership"). This phone has a single user.
+git config --global --get-all safe.directory 2>/dev/null | grep -qx '\*' \
+    || git config --global --add safe.directory '*'
+[ -n "$(git config --global init.defaultBranch)" ] || git config --global init.defaultBranch main
+
+echo
+echo "${green}GitHub is connected.${reset}"
+gh auth status --hostname github.com 2>&1 | sed -n 's/^ *✓ *//p' | head -2
+echo "Commits are signed as: $(git config --global user.name) <$(git config --global user.email)>"
+cat <<EOF
+
+Try:  ${bold}gh repo clone OWNER/REPO${reset}   ${bold}gh repo list${reset}   ${bold}git push${reset}
+Claude Code can now push and open pull requests too.
+EOF

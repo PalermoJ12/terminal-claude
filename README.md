@@ -20,10 +20,11 @@ Claude Code needs a **64-bit** device (arm64 or x86_64) with roughly **1 GB of f
 Open **Terminal Claude** and leave it open. The first session runs `claude-setup`, which:
 
 1. **Asks for storage access.** Tap *Allow* so Claude can read and edit your files. Your shared storage then appears at `~/storage/shared` (for example `~/storage/shared/Download`).
-2. **Updates Termux and installs tools:** git, openssh, curl, wget, python, Node.js (LTS), ripgrep, jq, nano, vim, tmux, ttyd and proot-distro.
+2. **Updates Termux and installs tools:** git, openssh, curl, wget, python, Node.js (LTS), ripgrep, jq, nano, vim, tmux, ttyd, the GitHub CLI (gh) and proot-distro.
 3. **Creates a small Debian environment** (`claude-env`) with proot-distro. Claude Code is published only as Linux (glibc) binaries, not Android ones, so it runs in there. Debian also gets git, Python, Node.js and npm.
 4. **Installs Claude Code** with the official installer, falling back to npm if that fails.
-5. **Adds the `claude`, `claude-shell` and `remote-access` commands.**
+5. **Adds the `claude`, `claude-shell`, `github-login` and `remote-access` commands.**
+6. **Offers to sign you in to GitHub** (optional, see [GitHub](#github)).
 
 The download is about 300–500 MB and takes 5–15 minutes. If a step fails (usually because the connection dropped), run `claude-setup` to pick up where it stopped. `claude-setup --force` redoes every step. The log is at `~/.terminal-claude/setup.log`.
 
@@ -41,6 +42,22 @@ claude                                      # start Claude Code here
 **Logging in.** The first time you run `claude`, it shows a sign-in link. Tap it, or long-press the terminal and choose *More… → Select URL*, then sign in and paste the code back into the terminal. To use an API key instead, run `export ANTHROPIC_API_KEY=sk-ant-...` before `claude`. Add that line to `~/.bashrc` to keep it.
 
 **Updates.** Claude Code updates itself. Run `pkg upgrade` now and then to update the Termux tools. When you install a newer APK, setup reruns automatically if anything changed. It skips the steps that are already done.
+
+## GitHub
+
+```sh
+github-login
+```
+
+This signs you in with the GitHub CLI. It shows a one-time code and opens github.com in your browser, where you paste the code and approve. Setup also offers this at the end. Afterwards:
+
+- `git clone`, `git pull` and `git push` to your GitHub repos work over HTTPS with no password prompts.
+- `gh` works: `gh repo clone OWNER/REPO`, `gh repo create`, `gh pr create`, `gh issue list`, …
+- **Claude Code can use it too.** The sign-in and `~/.gitconfig` are shared with the Debian environment, so Claude can commit, push and open pull requests for you.
+- If you haven't set a commit name and email, it uses your GitHub name and your private `ID+username@users.noreply.github.com` address. To change them: `git config --global user.name "…"` and `git config --global user.email …`.
+- Git normally refuses repos on shared storage (`/sdcard`) with a "dubious ownership" error. `github-login` turns that check off with `safe.directory = *`, which is fine for a single-user phone.
+
+`github-login --status` shows the signed-in account, and `github-login --logout` signs out. The token is kept in `~/.config/gh/hosts.yml` in the app's private storage, which other apps can't read.
 
 ## Run local servers (localhost)
 
@@ -102,6 +119,7 @@ The changes from upstream Termux are:
 | File | Change |
 |---|---|
 | `app/src/main/assets/terminal-claude/claude-setup` | The setup script described above, installed to `$PREFIX/bin/claude-setup`. |
+| `app/src/main/assets/terminal-claude/github-login` | The `github-login` command (GitHub CLI sign-in plus git credential and identity setup), installed to `$PREFIX/bin/`. |
 | `app/src/main/assets/terminal-claude/remote-access` | The `remote-access` command (web terminal with ttyd, SSH with sshd), installed to `$PREFIX/bin/`. |
 | `app/src/main/assets/terminal-claude/terminal-claude.sh` | Installed to `$PREFIX/etc/profile.d/`. Runs `claude-setup` in new sessions until the current setup version has finished, and starts `remote-access` if autostart is on. |
 | `app/src/main/java/com/termux/app/ClaudeSetupInstaller.java` | Copies the two files above into place when the first session starts. |

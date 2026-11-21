@@ -2,7 +2,7 @@
 # Runs the Claude Code setup in the first interactive session, and again when
 # an app update brings a newer setup version. Must match SETUP_VERSION in
 # claude-setup.
-TERMINAL_CLAUDE_SETUP_VERSION=2
+TERMINAL_CLAUDE_SETUP_VERSION=3
 case "$-" in
     *i*)
         if [ -z "$TERMINAL_CLAUDE_SETUP_RUNNING" ] && [ -x "$PREFIX/bin/claude-setup" ] &&

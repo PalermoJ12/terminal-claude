@@ -23,6 +23,7 @@ import java.io.OutputStream;
  *   interactive shell until setup has finished (and again after an update changes it).</li>
  *   <li>{@code $PREFIX/bin/remote-access}: serves the terminal to a computer over the web
  *   (ttyd) and SSH.</li>
+ *   <li>{@code $PREFIX/bin/github-login}: signs in to GitHub with gh and sets up git.</li>
  * </ul>
  */
 final class ClaudeSetupInstaller {
@@ -37,6 +38,8 @@ final class ClaudeSetupInstaller {
             TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/claude-setup", true);
         copyAsset(context, "remote-access",
             TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/remote-access", true);
+        copyAsset(context, "github-login",
+            TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/github-login", true);
         copyAsset(context, "terminal-claude.sh",
             TermuxConstants.TERMUX_ETC_PREFIX_DIR_PATH + "/profile.d/terminal-claude.sh", false);
     }
