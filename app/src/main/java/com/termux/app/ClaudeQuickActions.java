@@ -231,10 +231,10 @@ final class ClaudeQuickActions {
         "If the buttons don't all fit, swipe the row sideways.\n\n" +
         "KEYS ROW\n" +
         "ESC — stop Claude mid-answer.\n" +
-        "⇧TAB — switch Claude's mode (normal, auto-accept edits, plan).\n" +
+        "⇧⇥ — switch Claude's mode (normal, auto-accept edits, plan).\n" +
         "/ — Claude commands like /help, /clear.   @ — mention a file.   ! — run a shell command.\n" +
-        "↑ ↓ — earlier messages and menu choices.   PASTE — paste.\n" +
-        "Swipe up on a key for its second symbol (- gives _, / gives \\).\n" +
+        "↑ ↓ — earlier messages and menu choices.   ⎘ — paste.\n" +
+        "Swipe up on a key for its second symbol: - gives _, / gives \\, ← gives Home, → gives End.\n" +
         "Pinch the terminal to zoom the text. Long-press for copy, paste and more.\n\n" +
         "IN CLAUDE\n" +
         "Type what you want in plain words, like \"make a todo web app\". " +

@@ -40,21 +40,19 @@ for node in ET.parse('/tmp/ui.xml').iter('node'):
         break
 PY
 }
-# Scrolls the quick-action row so later buttons come into view.
+# Scrolls the quick-action row (which sits just above the keys) left or right.
+BAR_Y=""
 swipe_bar() {
-    local xy y
-    xy="$(find_text "✦ Claude")" || return
-    y="${xy#* }"
-    [ -n "$y" ] && adb shell input swipe 300 "$y" 20 "$y" 300
+    [ -n "$BAR_Y" ] || return
+    if [ "$1" = left ]; then adb shell input swipe 300 "$BAR_Y" 20 "$BAR_Y" 300
+    else adb shell input swipe 20 "$BAR_Y" 300 "$BAR_Y" 300; fi
     sleep 1
 }
 tap() {
     local xy
     xy="$(find_text "$1")"
-    if [ -z "$xy" ]; then
-        swipe_bar
-        xy="$(find_text "$1")"
-    fi
+    if [ -z "$xy" ]; then swipe_bar left; xy="$(find_text "$1")"; fi
+    if [ -z "$xy" ]; then swipe_bar right; swipe_bar right; xy="$(find_text "$1")"; fi
     if [ -n "$xy" ]; then
         adb shell input tap $xy
         echo "tapped '$1' at $xy"
@@ -99,6 +97,7 @@ adb shell input text n
 adb shell input keyevent 66
 sleep 3
 shot 05-ready
+xy="$(find_text "✦ Claude")" && BAR_Y="${xy#* }"
 
 tap "?"
 sleep 3

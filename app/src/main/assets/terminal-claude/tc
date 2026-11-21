@@ -111,9 +111,9 @@ ${bold}Buttons above the keyboard${reset}
   ⌨        show or hide the keyboard        ?      this help
 
 ${bold}Keys row${reset}
-  ESC       stop Claude mid-answer          ⇧TAB  switch Claude's mode (plan, auto-accept)
+  ESC       stop Claude mid-answer          ⇧⇥    switch Claude's mode (plan, auto-accept)
   / @ !     Claude commands, files, shell   ⎘     paste
-  Swipe up on a key for its second symbol (e.g. - gives _). Pinch to zoom text.
+  Swipe up on a key for its second symbol (- gives _, ← gives Home). Pinch to zoom.
 
 ${bold}Commands${reset}
   claude               start Claude here       claude-shell   Debian shell (apt, ...)

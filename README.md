@@ -46,11 +46,11 @@ The keys row is set up for Claude Code. Swipe up on a key to get the symbol show
 | Key | Use |
 |---|---|
 | **ESC** | Stop Claude mid-answer. |
-| **⇧TAB** | Switch Claude's mode (normal, auto-accept edits, plan). |
+| **⇧⇥** (Shift+Tab) | Switch Claude's mode (normal, auto-accept edits, plan). |
 | **/** (\\) · **@** (#) · **!** (\|) | Claude commands, mention a file, run a shell command. |
-| **↑ ↓ ← →**, **HOME** (PGUP), **END** (PGDN) | History, menus, moving the cursor. |
-| **TAB**, **CTRL** (^C), **ALT**, **-** (_) | As on a computer keyboard. |
-| **⎘** (~) | Paste. |
+| **↑** (PgUp) **↓** (PgDn) **←** (Home) **→** (End) | History, menus, moving the cursor. |
+| **TAB**, **CTRL** (^C), **ALT**, **-** (_), **~** (\`), **\|** (&) | As on a computer keyboard. |
+| **⎘** | Paste. |
 
 Other things that make it easier on a phone:
 
