@@ -1,0 +1,212 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Terminal Claude: first-run setup.
+#
+# Installs everything needed to run Claude Code on this device:
+#   1. Asks for access to your device storage (so Claude can work on your files).
+#   2. Updates Termux packages and installs common developer tools.
+#   3. Creates a small Debian Linux environment with proot-distro. Claude Code
+#      only ships Linux (glibc) binaries, not Android ones, so it runs in there.
+#   4. Installs Claude Code inside that environment with the official installer.
+#   5. Adds a `claude` command to Termux that runs Claude Code in your
+#      current directory, with your Termux home and /sdcard visible to it.
+#
+# The script is safe to run again: finished steps are skipped. Run
+# `claude-setup --force` to redo every step.
+
+set -o pipefail
+
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+STATE_DIR="$HOME/.terminal-claude"
+LOG_FILE="$STATE_DIR/setup.log"
+LOCK_DIR="$STATE_DIR/setup.lock"
+DONE_MARKER="$STATE_DIR/setup-complete"
+CONTAINER="claude-env"
+IMAGE="debian:stable-slim"
+
+TERMUX_PACKAGES=(
+    proot-distro git openssh curl wget python nodejs-lts ripgrep jq
+    nano vim tmux which tar unzip zip termux-api termux-tools
+)
+DEBIAN_PACKAGES=(
+    ca-certificates curl wget git ripgrep procps less nano openssh-client
+    python3 nodejs npm unzip xz-utils bash-completion
+)
+
+FORCE=0
+[ "$1" = "--force" ] && FORCE=1
+
+bold=$'\e[1m'; green=$'\e[32m'; yellow=$'\e[33m'; red=$'\e[31m'; cyan=$'\e[36m'; reset=$'\e[0m'
+
+step()  { printf '\n%s==> %s%s\n' "$bold$cyan" "$*" "$reset"; echo "==> $*" >>"$LOG_FILE"; }
+ok()    { printf '%s  ✓ %s%s\n' "$green" "$*" "$reset"; }
+warn()  { printf '%s  ! %s%s\n' "$yellow" "$*" "$reset"; echo "WARN: $*" >>"$LOG_FILE"; }
+fail()  {
+    printf '\n%s✗ %s%s\n' "$red" "$*" "$reset"
+    echo "ERROR: $*" >>"$LOG_FILE"
+    printf 'Full log: %s\n' "$LOG_FILE"
+    printf 'Fix the problem (usually: check your internet connection) and run %sclaude-setup%s to retry.\n' "$bold" "$reset"
+    cleanup
+    exit 1
+}
+
+# Run a command, showing its output and appending it to the log.
+run() { "$@" 2>&1 | tee -a "$LOG_FILE"; return "${PIPESTATUS[0]}"; }
+
+cleanup() {
+    command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock >/dev/null 2>&1
+    rmdir "$LOCK_DIR" 2>/dev/null
+}
+
+mkdir -p "$STATE_DIR"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo "Claude setup is already running in another session. Wait for it to finish there."
+    echo "(If it is not running, delete $LOCK_DIR and try again.)"
+    exit 1
+fi
+trap 'cleanup; exit 130' INT TERM
+export TERMINAL_CLAUDE_SETUP_RUNNING=1
+echo "--- claude-setup started $(date) ---" >>"$LOG_FILE"
+
+cat <<EOF
+
+${bold}Terminal Claude setup${reset}
+This downloads about 300-500 MB and takes 5-15 minutes on the first launch.
+Keep the app open and stay connected to the internet. Log: $LOG_FILE
+EOF
+
+# Keep the device from sleeping and killing the download.
+command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock >/dev/null 2>&1
+
+# --- 0. CPU check -----------------------------------------------------------
+case "$(uname -m)" in
+    aarch64|x86_64) ;;
+    *) fail "This device's CPU ($(uname -m)) is 32-bit. Claude Code needs a 64-bit (arm64 or x86_64) device." ;;
+esac
+
+# --- 1. Storage access ------------------------------------------------------
+step "Storage access"
+if [ -d "$HOME/storage/shared" ] && [ "$FORCE" = 0 ]; then
+    ok "Already granted (~/storage/shared -> /sdcard)"
+else
+    echo "Android will ask for permission to access your files. Tap 'Allow'."
+    termux-setup-storage >/dev/null 2>&1
+    for _ in $(seq 1 30); do
+        [ -d "$HOME/storage/shared" ] && break
+        sleep 1
+    done
+    if [ -d "$HOME/storage/shared" ]; then
+        ok "Granted: your files are at ~/storage/shared (and /sdcard inside Claude)"
+    else
+        warn "Storage permission not granted yet. Run 'termux-setup-storage' later to allow it."
+    fi
+fi
+
+# --- 2. Termux packages -----------------------------------------------------
+export DEBIAN_FRONTEND=noninteractive
+APT_OPTS=(-y -o Dpkg::Options::=--force-confnew -o Dpkg::Options::=--force-confdef)
+
+step "Updating Termux packages"
+run pkg update "${APT_OPTS[@]}" || run pkg update "${APT_OPTS[@]}" || fail "Could not update Termux packages."
+run pkg upgrade "${APT_OPTS[@]}" || fail "Could not upgrade Termux packages."
+ok "Termux packages are up to date"
+
+step "Installing tools: ${TERMUX_PACKAGES[*]}"
+run pkg install "${APT_OPTS[@]}" "${TERMUX_PACKAGES[@]}" || fail "Could not install Termux packages."
+ok "Tools installed"
+
+# --- 3. Debian environment --------------------------------------------------
+step "Creating the Linux environment for Claude ($IMAGE)"
+container_ok() { proot-distro login "$CONTAINER" -- true >/dev/null 2>&1; }
+if container_ok && [ "$FORCE" = 0 ]; then
+    ok "Already installed"
+else
+    if [ "$FORCE" = 1 ] && container_ok; then
+        run proot-distro remove "$CONTAINER" || true
+    fi
+    run proot-distro install --name "$CONTAINER" "$IMAGE" || fail "Could not install the Debian environment."
+    container_ok || fail "The Debian environment was installed but does not start."
+    ok "Debian environment ready"
+fi
+
+step "Installing Linux packages inside the environment"
+run proot-distro login "$CONTAINER" -- env DEBIAN_FRONTEND=noninteractive bash -c "
+    apt-get update &&
+    apt-get install -y --no-install-recommends ${DEBIAN_PACKAGES[*]}
+" || fail "Could not install packages inside the Debian environment."
+ok "Linux packages installed"
+
+# --- 4. Claude Code ---------------------------------------------------------
+step "Installing Claude Code"
+# Official native installer first; npm (same native binary) as a fallback.
+if ! run proot-distro login "$CONTAINER" -- bash -c '
+    set -e
+    curl -fsSL https://claude.ai/install.sh -o /tmp/claude-install.sh
+    bash /tmp/claude-install.sh
+    rm -f /tmp/claude-install.sh
+'; then
+    warn "The official installer failed; trying npm instead."
+    run proot-distro login "$CONTAINER" -- npm install -g @anthropic-ai/claude-code \
+        || fail "Could not install Claude Code."
+fi
+run proot-distro login "$CONTAINER" -- bash -c '
+    cat > /usr/local/bin/claude-launch <<"EOF2"
+#!/bin/sh
+for c in /root/.local/bin/claude /usr/local/bin/claude /usr/bin/claude; do
+    [ -x "$c" ] && exec "$c" "$@"
+done
+echo "Claude Code is not installed. Run claude-setup in Terminal Claude." >&2
+exit 127
+EOF2
+    chmod 755 /usr/local/bin/claude-launch
+    grep -q "/.local/bin" /root/.bashrc 2>/dev/null || echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> /root/.bashrc
+' || fail "Could not create the Claude launcher."
+
+# --- 5. Commands ------------------------------------------------------------
+step "Adding the 'claude' and 'claude-shell' commands"
+cat >"$PREFIX/bin/claude" <<'WRAPPER'
+#!/data/data/com.termux/files/usr/bin/bash
+# Terminal Claude: runs Claude Code inside the claude-env Debian environment,
+# starting in your current directory. Termux's home and your device storage
+# (/sdcard, /storage/emulated/0) are shared with the environment.
+WD="$(pwd -P 2>/dev/null || echo "$HOME")"
+exec proot-distro login claude-env \
+    --shared-tmp \
+    --work-dir "$WD" \
+    --env BROWSER=termux-open-url \
+    --env TERMUX_HOME="$HOME" \
+    -- /usr/local/bin/claude-launch "$@"
+WRAPPER
+cat >"$PREFIX/bin/claude-shell" <<'WRAPPER'
+#!/data/data/com.termux/files/usr/bin/bash
+# Terminal Claude: opens a shell in the Debian environment Claude runs in,
+# in your current directory.
+WD="$(pwd -P 2>/dev/null || echo "$HOME")"
+exec proot-distro login claude-env --shared-tmp --work-dir "$WD" "$@"
+WRAPPER
+chmod 755 "$PREFIX/bin/claude" "$PREFIX/bin/claude-shell"
+ok "Commands added"
+
+step "Checking that Claude Code starts"
+if version="$(bash "$PREFIX/bin/claude" --version 2>>"$LOG_FILE")"; then
+    ok "Claude Code $version"
+else
+    fail "Claude Code was installed but did not start (see the log)."
+fi
+
+date >"$DONE_MARKER"
+cleanup
+trap - INT TERM
+
+cat <<EOF
+
+${bold}${green}All set!${reset}
+
+  ${bold}claude${reset}          start Claude Code in the current folder
+  ${bold}claude-shell${reset}    open a Debian shell (apt, npm, python...)
+  ${bold}cd ~/storage/shared${reset}  your phone's files (Download, Documents, ...)
+
+The first time you run ${bold}claude${reset} it asks you to log in: open the link it
+shows (long-press the screen > More > Select URL), sign in, and paste the
+code back. Or set ANTHROPIC_API_KEY to use an API key.
+
+EOF
