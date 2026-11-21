@@ -12,6 +12,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
 /**
@@ -30,8 +31,9 @@ import java.util.Arrays;
  * </ul>
  *
  * <p>{@link #installTerminalDefaults} writes the look and keyboard defaults to {@code ~/.termux}.
- * A file is only written when it is missing or still starts with the managed marker, so edits
- * the user makes (after deleting the marker) are kept.
+ * A file is only written when it is missing, has no settings in it (Termux creates a
+ * termux.properties that is all comments), or still starts with the managed marker, so edits the
+ * user makes (after deleting the marker) are kept.
  */
 final class ClaudeSetupInstaller {
 
@@ -44,6 +46,8 @@ final class ClaudeSetupInstaller {
 
     static void installSetupFiles(Context context) {
         copyAsset(context, "claude-setup", BIN + "/claude-setup", true);
+        copyAsset(context, "claude", BIN + "/claude", true);
+        copyAsset(context, "claude-shell", BIN + "/claude-shell", true);
         copyAsset(context, "tc", BIN + "/tc", true);
         copyAsset(context, "remote-access", BIN + "/remote-access", true);
         copyAsset(context, "github-login", BIN + "/github-login", true);
@@ -99,10 +103,20 @@ final class ClaudeSetupInstaller {
             } catch (IOException e) {
                 return false;
             }
-            if (!new String(current).startsWith(MANAGED_MARKER)) return false; // the user's own file
             if (Arrays.equals(current, wanted)) return false;
+            String text = new String(current, StandardCharsets.UTF_8);
+            if (!text.startsWith(MANAGED_MARKER) && hasSettings(text)) return false; // the user's own
         }
         return copyAsset(context, assetName, destPath, false);
+    }
+
+    /** Whether a .properties file sets anything, i.e. has a line that isn't blank or a comment. */
+    private static boolean hasSettings(String text) {
+        for (String line : text.split("\n")) {
+            String trimmed = line.trim();
+            if (!trimmed.isEmpty() && !trimmed.startsWith("#") && !trimmed.startsWith("!")) return true;
+        }
+        return false;
     }
 
     private static byte[] readAll(InputStream in) throws IOException {

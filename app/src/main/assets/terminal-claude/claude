@@ -1,0 +1,31 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Terminal Claude: runs Claude Code inside the claude-env Debian environment,
+# starting in your current directory. Termux's home and your device storage
+# (/sdcard, /storage/emulated/0) are shared with the environment, and so are
+# the GitHub sign-in (gh) and ~/.gitconfig. Installs Claude Code first if
+# setup hasn't finished yet.
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+
+if [ -z "$TERMINAL_CLAUDE_SETUP_RUNNING" ] && [ ! -f "$HOME/.terminal-claude/setup-complete" ]; then
+    if "$PREFIX/bin/bash" "$PREFIX/bin/claude-setup" --is-running; then
+        echo "Claude Code is still being installed in another tab (open it with ☰ Tabs)."
+        echo "Try again when it says \"All set!\"."
+        exit 1
+    fi
+    echo "Claude Code isn't installed yet. Installing it now..."
+    "$PREFIX/bin/bash" "$PREFIX/bin/claude-setup" || exit 1
+fi
+if ! command -v proot-distro >/dev/null 2>&1; then
+    echo "Claude Code's environment is missing. Run: claude-setup --force" >&2
+    exit 1
+fi
+
+WD="$(pwd -P 2>/dev/null || echo "$HOME")"
+exec proot-distro login claude-env \
+    --shared-tmp \
+    --work-dir "$WD" \
+    --env BROWSER=termux-open-url \
+    --env TERMUX_HOME="$HOME" \
+    --env GH_CONFIG_DIR="$HOME/.config/gh" \
+    --env GIT_CONFIG_GLOBAL="$HOME/.gitconfig" \
+    -- /usr/local/bin/claude-launch "$@"

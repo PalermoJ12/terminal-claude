@@ -11,7 +11,7 @@ case "$-" in
         __tc_setup_version="$(sed -n 's/^SETUP_VERSION=//p' "$PREFIX/bin/claude-setup" 2>/dev/null | head -1)"
         if [ -z "$TERMINAL_CLAUDE_SETUP_RUNNING" ] && [ -n "$__tc_setup_version" ] &&
             [ "$(cat "$HOME/.terminal-claude/setup-complete" 2>/dev/null)" != "$__tc_setup_version" ] &&
-            [ ! -d "$HOME/.terminal-claude/setup.lock" ]; then
+            ! "$PREFIX/bin/bash" "$PREFIX/bin/claude-setup" --is-running; then
             "$PREFIX/bin/bash" "$PREFIX/bin/claude-setup"
             TC_NO_WELCOME=1
         fi

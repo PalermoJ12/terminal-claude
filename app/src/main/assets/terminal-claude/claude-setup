@@ -13,6 +13,7 @@
 # Safe to run again: finished steps are skipped.
 #   claude-setup --force     redo every step
 #   claude-setup --verbose   show the full install output instead of a spinner
+#   claude-setup --is-running  exit 0 if setup is running in another tab
 
 # Bump this when the steps change, so existing installs run the new steps after
 # an app update (terminal-claude.sh and tc compare it with setup-complete).
@@ -38,6 +39,16 @@ DEBIAN_PACKAGES=(
     ca-certificates curl wget git ripgrep procps less nano openssh-client
     python3 nodejs npm unzip xz-utils bash-completion iproute2 gh
 )
+
+# The lock holds the PID of the running setup. A lock left behind by a setup that
+# was killed (app closed or updated mid-setup) is detected and replaced.
+setup_running() {
+    local pid
+    pid="$(cat "$LOCK_DIR/pid" 2>/dev/null)" || return 1
+    [ -n "$pid" ] && [ "$pid" != "$$" ] && kill -0 "$pid" 2>/dev/null &&
+        tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q claude-setup
+}
+if [ "$1" = "--is-running" ]; then setup_running; exit; fi
 
 FORCE=0; VERBOSE=0
 for arg in "$@"; do
@@ -94,15 +105,16 @@ run() {
 
 cleanup() {
     command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock >/dev/null 2>&1
-    rmdir "$LOCK_DIR" 2>/dev/null
+    rm -rf "$LOCK_DIR"
 }
 
 mkdir -p "$STATE_DIR"
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    echo "Setup is already running in another tab. Open it with the Tabs button."
-    echo "${dim}(If it isn't running, delete $LOCK_DIR and try again.)${reset}"
+if setup_running; then
+    echo "Setup is already running in another tab. Open it with the ☰ Tabs button."
     exit 1
 fi
+rm -rf "$LOCK_DIR"
+mkdir -p "$LOCK_DIR" && echo $$ >"$LOCK_DIR/pid"
 trap 'printf "\n"; cleanup; exit 130' INT TERM
 export TERMINAL_CLAUDE_SETUP_RUNNING=1
 echo "--- claude-setup started $(date) ---" >>"$LOG_FILE"
@@ -248,38 +260,12 @@ proot-distro login "$CONTAINER" -- bash -c '
   signed in, ask the user to tap the GitHub button (or run `github-login`).
 EOF2
     fi
-'' >>"$LOG_FILE" 2>&1 || warn "Could not write /root/.claude/CLAUDE.md"
+' >>"$LOG_FILE" 2>&1 || warn "Could not write /root/.claude/CLAUDE.md"
 [ "$claude_new" = 1 ] && ok "Installed"
 
 # --- 7. Commands ------------------------------------------------------------
 step "Finishing up"
-cat >"$PREFIX/bin/claude" <<'WRAPPER'
-#!/data/data/com.termux/files/usr/bin/bash
-# Terminal Claude: runs Claude Code inside the claude-env Debian environment,
-# starting in your current directory. Termux's home and your device storage
-# (/sdcard, /storage/emulated/0) are shared with the environment, and so are
-# the GitHub sign-in (gh) and ~/.gitconfig.
-WD="$(pwd -P 2>/dev/null || echo "$HOME")"
-exec proot-distro login claude-env \
-    --shared-tmp \
-    --work-dir "$WD" \
-    --env BROWSER=termux-open-url \
-    --env TERMUX_HOME="$HOME" \
-    --env GH_CONFIG_DIR="$HOME/.config/gh" \
-    --env GIT_CONFIG_GLOBAL="$HOME/.gitconfig" \
-    -- /usr/local/bin/claude-launch "$@"
-WRAPPER
-cat >"$PREFIX/bin/claude-shell" <<'WRAPPER'
-#!/data/data/com.termux/files/usr/bin/bash
-# Terminal Claude: opens a shell in the Debian environment Claude runs in,
-# in your current directory. Shares the GitHub sign-in and git config with Termux.
-WD="$(pwd -P 2>/dev/null || echo "$HOME")"
-exec proot-distro login claude-env --shared-tmp --work-dir "$WD" \
-    --env GH_CONFIG_DIR="$HOME/.config/gh" \
-    --env GIT_CONFIG_GLOBAL="$HOME/.gitconfig" \
-    "$@"
-WRAPPER
-chmod 755 "$PREFIX/bin/claude" "$PREFIX/bin/claude-shell"
+# The claude and claude-shell commands are installed by the app itself.
 if version="$(bash "$PREFIX/bin/claude" --version 2>>"$LOG_FILE")"; then
     echo "claude --version: $version" >>"$LOG_FILE"
     ok "Claude Code ${version%% *} is ready"

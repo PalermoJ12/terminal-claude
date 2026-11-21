@@ -1,0 +1,13 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Terminal Claude: opens a shell in the Debian environment Claude runs in,
+# in your current directory. Shares the GitHub sign-in and git config with Termux.
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+if ! command -v proot-distro >/dev/null 2>&1 || [ ! -f "$HOME/.terminal-claude/setup-complete" ]; then
+    echo "The Linux environment isn't set up yet. Run: claude-setup" >&2
+    exit 1
+fi
+WD="$(pwd -P 2>/dev/null || echo "$HOME")"
+exec proot-distro login claude-env --shared-tmp --work-dir "$WD" \
+    --env GH_CONFIG_DIR="$HOME/.config/gh" \
+    --env GIT_CONFIG_GLOBAL="$HOME/.gitconfig" \
+    "$@"
