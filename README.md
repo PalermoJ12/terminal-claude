@@ -6,10 +6,9 @@ It is a build of the open-source [Termux](https://github.com/termux/termux-app) 
 
 ## Install
 
-1. Open the [Releases](../../releases) page and download an APK:
-   - `terminal-claude_arm64-v8a.apk`: most phones and tablets.
-   - `terminal-claude_x86_64.apk`: x86_64 devices and emulators.
-   - `terminal-claude_universal.apk`: if you're not sure which you need.
+1. Open the [latest release](../../releases/latest) and download an APK:
+   - `terminal-claude.apk`: phones and tablets.
+   - `terminal-claude_universal-all-devices.apk`: use this if Android says the app "isn't compatible", or for emulators and Chromebooks. It's bigger, but it works on every device.
 2. **If the official Termux app is installed, uninstall it first.** This app uses the same package name (`com.termux`), because Termux's prebuilt packages only work under that name, and it's signed with a different key, so Android won't install one over the other.
 3. Open the APK and allow installing from unknown sources when Android asks.
 

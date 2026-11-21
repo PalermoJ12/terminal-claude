@@ -36,9 +36,10 @@ jobs:
           ./gradlew assembleDebug
 
           mkdir -p dist
-          for abi in arm64-v8a x86_64 universal; do
-            cp "app/build/outputs/apk/debug/termux-app_${tag}_${abi}.apk" "dist/terminal-claude_${abi}.apk"
-          done
+          # Phones are arm64. The universal APK also covers x86_64 emulators and
+          # Chromebooks; there's no separate x86_64 file to pick by mistake.
+          cp "app/build/outputs/apk/debug/termux-app_${tag}_arm64-v8a.apk" dist/terminal-claude.apk
+          cp "app/build/outputs/apk/debug/termux-app_${tag}_universal.apk" dist/terminal-claude_universal-all-devices.apk
           (cd dist && sha256sum *.apk > sha256sums.txt)
           ls -lh dist
 
@@ -60,8 +61,9 @@ jobs:
             --title "Terminal Claude $VERSION" \
             --notes "Built from ${GITHUB_SHA::7} on \`${GITHUB_REF_NAME}\`.
 
-          **Which file?** Most phones: \`terminal-claude_arm64-v8a.apk\`. Not sure: \`terminal-claude_universal.apk\`.
-          Claude Code needs a 64-bit device (arm64 or x86_64).
+          **Which file?** Phones and tablets: \`terminal-claude.apk\`.
+          If Android says the app isn't compatible, or for emulators and Chromebooks: \`terminal-claude_universal-all-devices.apk\` (bigger, works everywhere).
+          Claude Code needs a 64-bit device.
 
           Uninstall Termux first if you have it installed (same package name, different signing key).
           On first launch the app sets up storage access, a Debian environment and Claude Code automatically.
